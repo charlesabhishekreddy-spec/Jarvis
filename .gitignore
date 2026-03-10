@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+.jarvis_runtime/
+reports/
+jarvis_tts_output.wav

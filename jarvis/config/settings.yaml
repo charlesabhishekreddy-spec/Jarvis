@@ -1,0 +1,43 @@
+runtime:
+  env: development
+  data_dir: .jarvis_runtime
+  host: 127.0.0.1
+  port: 8000
+  auto_start_api: true
+
+voice:
+  enabled: true
+  wake_word: hey jarvis
+  language: en
+  use_porcupine: false
+  streaming: false
+
+memory:
+  sqlite_path: .jarvis_runtime/jarvis.db
+  semantic_index_path: .jarvis_runtime/semantic_memory.json
+  max_recent_items: 200
+
+security:
+  confirm_dangerous_commands: true
+  allow_shell: true
+  allowed_workdirs:
+    - ./
+
+api_keys:
+  news_api_key: ""
+  weather_api_key: ""
+  elevenlabs_api_key: ""
+
+intelligence:
+  provider: heuristic
+  model: local-heuristic
+  endpoint: http://127.0.0.1:11434/api/generate
+  timeout_seconds: 20
+
+learning:
+  enabled: true
+  auto_extract_preferences: true
+  max_patterns: 500
+
+ui:
+  dashboard_poll_seconds: 3
