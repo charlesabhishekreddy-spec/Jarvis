@@ -4,6 +4,7 @@ import asyncio
 import inspect
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
 
 from .models import Event
@@ -40,15 +41,28 @@ class AsyncEventBus:
 
     def recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
         events = list(self._history)[-limit:]
-        return [
-            {
-                "event_id": event.event_id,
-                "topic": event.topic,
-                "timestamp": event.timestamp.isoformat(),
-                "payload": event.payload,
-            }
-            for event in events
-        ]
+        return [self.serialize_event(event) for event in events]
+
+    async def open_stream(self, topic_pattern: str = "*", maxsize: int = 100) -> tuple[asyncio.Queue[Event], EventHandler]:
+        queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=maxsize)
+
+        async def handler(event: Event) -> None:
+            if queue.full():
+                with suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+            with suppress(asyncio.QueueFull):
+                queue.put_nowait(event)
+
+        await self.subscribe(topic_pattern, handler)
+        return queue, handler
+
+    def serialize_event(self, event: Event) -> dict[str, Any]:
+        return {
+            "event_id": event.event_id,
+            "topic": event.topic,
+            "timestamp": event.timestamp.isoformat(),
+            "payload": event.payload,
+        }
 
     def _matching_handlers(self, topic: str) -> list[EventHandler]:
         handlers: list[EventHandler] = []

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from jarvis.brain.intelligence import IntelligenceService
+from jarvis.brain.learning import AdaptiveLearningService
 from jarvis.automation.scheduler import AutomationService
 from jarvis.brain.reasoning import ReasoningEngine
 from jarvis.memory.service import MemoryService
@@ -29,7 +31,13 @@ class JarvisRuntime(Service):
         self.memory = MemoryService(settings.memory.sqlite_path, settings.memory.semantic_index_path)
         self.security = SecurityManager(settings.security)
         self.system_controller = SystemController(self.security)
-        self.automation = AutomationService(self.bus)
+        self.automation = AutomationService(self.bus, self.memory)
+        self.intelligence = IntelligenceService(settings.intelligence)
+        self.learning = AdaptiveLearningService(
+            memory=self.memory,
+            intelligence=self.intelligence,
+            enabled=settings.learning.enabled,
+        )
         self.web = WebIntelligenceService(
             news_api_key=settings.api_keys.news_api_key,
             weather_api_key=settings.api_keys.weather_api_key,
@@ -50,6 +58,8 @@ class JarvisRuntime(Service):
             vision=self.vision,
             tools=self.tools,
             plugins=self.plugins,
+            intelligence=self.intelligence,
+            learning=self.learning,
             runtime=self,
         )
         self.voice = VoicePipeline(self.context)
@@ -60,6 +70,8 @@ class JarvisRuntime(Service):
             self.security,
             self.system_controller,
             self.automation,
+            self.intelligence,
+            self.learning,
             self.web,
             self.vision,
             self.plugins,
@@ -84,6 +96,7 @@ class JarvisRuntime(Service):
         await self.bus.publish("command.received", {"request_id": request.request_id, "text": request.text, "source": request.source})
         response = await self.reasoning.execute(request)
         await self.memory.save_exchange(request, response)
+        await self.learning.capture_interaction(request, response)
         await self.memory.log_activity(
             category="command",
             message=response.message,
@@ -102,7 +115,8 @@ class JarvisRuntime(Service):
             "services": [service.status() for service in self.services],
             "plugins": self.plugins.list_plugins(),
             "tools": self.tools.list_tools(),
-            "jobs": self.automation.list_jobs(),
+            "jobs": await self.automation.snapshot_jobs(),
+            "insights": await self.learning.insights(),
             "resources": resources,
         }
 

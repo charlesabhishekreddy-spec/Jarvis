@@ -26,6 +26,9 @@ class AgentManager:
 
     def select(self, agent_hint: str, step) -> BaseAgent:
         for agent in self.agents:
-            if agent.name == agent_hint or agent.matches(step):
+            if agent.name == agent_hint:
+                return agent
+        for agent in self.agents:
+            if agent.matches(step):
                 return agent
         return CommanderAgent()

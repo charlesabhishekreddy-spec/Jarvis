@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JARVIS Dashboard</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Persistent AI Operating Layer</p>
+        <h1>JARVIS Control Surface</h1>
+        <p class="subtitle">Realtime runtime state, memory, jobs, and command execution in one browser console.</p>
+      </div>
+      <div class="hero-meta">
+        <div class="metric-card">
+          <span class="metric-label">Runtime</span>
+          <strong id="runtime-state">Unknown</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">CPU</span>
+          <strong id="runtime-cpu">-</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Memory</span>
+          <strong id="runtime-memory">-</strong>
+        </div>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <section class="panel command-panel">
+        <div class="panel-header">
+          <h2>Command Console</h2>
+          <span id="command-status" class="badge neutral">Idle</span>
+        </div>
+        <form id="command-form" class="command-form">
+          <textarea id="command-input" placeholder="Ask JARVIS to remember, research, schedule, inspect, or automate something." rows="4"></textarea>
+          <div class="command-actions">
+            <button type="submit">Execute</button>
+            <button type="button" class="ghost" data-command="What can you do">Capabilities</button>
+            <button type="button" class="ghost" data-command="Show system status">Status</button>
+            <button type="button" class="ghost" data-command="Prepare a report about renewable energy">Report</button>
+          </div>
+        </form>
+        <pre id="command-output" class="terminal-output">Awaiting command.</pre>
+      </section>
+
+      <section class="panel live-panel">
+        <div class="panel-header">
+          <h2>Live Event Stream</h2>
+          <span id="event-indicator" class="badge neutral">Connecting</span>
+        </div>
+        <div id="event-stream" class="event-stream"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Services</h2>
+        </div>
+        <div id="services-grid" class="services-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Automation Jobs</h2>
+        </div>
+        <div id="jobs-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel wide">
+        <div class="panel-header">
+          <h2>Recent Tasks</h2>
+        </div>
+        <div id="tasks-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Memory Insights</h2>
+        </div>
+        <div id="insights-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Tools</h2>
+        </div>
+        <div id="tools-list" class="stack-list compact"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Activity Log</h2>
+        </div>
+        <div id="activity-list" class="stack-list compact"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/assets/dashboard.js" defer></script>
+</body>
+</html>

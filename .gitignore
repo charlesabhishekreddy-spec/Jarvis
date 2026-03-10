@@ -2,5 +2,6 @@
 __pycache__/
 *.pyc
 .jarvis_runtime/
+.test_runtime/
 reports/
 jarvis_tts_output.wav

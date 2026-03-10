@@ -11,14 +11,16 @@ class NotifierPlugin(JarvisPlugin):
     description = "Example plugin that records automation events into memory."
 
     async def register(self, context: JarvisContext) -> None:
+        api = self.api(context)
+
         async def on_event(event: Event) -> None:
-            await context.memory.log_activity(
+            await api.log(
                 category="plugin.notifier",
                 message=f"Automation event: {event.topic}",
                 details=event.payload,
             )
 
-        await context.bus.subscribe("automation.*", on_event)
+        await api.subscribe("automation.*", on_event)
 
 
 PLUGIN_CLASS = NotifierPlugin

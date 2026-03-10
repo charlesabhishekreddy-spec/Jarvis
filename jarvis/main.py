@@ -3,10 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 from pathlib import Path
-
-import uvicorn
-
-from jarvis.api.app import create_app
 from jarvis.core.config import load_settings
 from jarvis.core.logging import configure_logging
 from jarvis.core.runtime import JarvisRuntime
@@ -29,10 +25,21 @@ def main() -> None:
         asyncio.run(_run_once(settings, args.once))
         return
 
-    app = create_app(args.config)
-    host = args.host or settings.runtime.host
-    port = args.port or settings.runtime.port
-    uvicorn.run(app, host=host, port=port)
+    if args.api or settings.runtime.auto_start_api:
+        from jarvis.api.app import create_app
+
+        try:
+            import uvicorn
+        except ImportError as exc:  # pragma: no cover
+            raise SystemExit("uvicorn is not installed. Install requirements.txt to run the API server.") from exc
+
+        app = create_app(args.config)
+        host = args.host or settings.runtime.host
+        port = args.port or settings.runtime.port
+        uvicorn.run(app, host=host, port=port)
+        return
+
+    asyncio.run(_run_forever(settings))
 
 
 async def _run_once(settings, command_text: str) -> None:
@@ -41,6 +48,18 @@ async def _run_once(settings, command_text: str) -> None:
     try:
         response = await runtime.execute_text(command_text, source="cli")
         print(response.message)
+    finally:
+        await runtime.stop()
+
+
+async def _run_forever(settings) -> None:
+    runtime = JarvisRuntime(settings)
+    await runtime.start()
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except KeyboardInterrupt:
+        pass
     finally:
         await runtime.stop()
 

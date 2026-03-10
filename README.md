@@ -9,8 +9,9 @@ This repository provides:
 - Local-first intelligence providers with heuristic and Ollama-compatible backends
 - Persistent memory with SQLite and a local semantic index
 - A personal knowledge graph and adaptive learning loop
+- Durable automation jobs that restore after runtime restart
 - Voice, vision, web, automation, and system-control service abstractions
-- A FastAPI developer surface and an optional PyQt dashboard
+- A FastAPI developer surface, realtime event streams, a browser dashboard, and an optional PyQt dashboard
 - A plugin SDK with auto-loading example plugins
 
 ## Quick Start
@@ -30,6 +31,8 @@ pip install -r requirements.txt
 python -m jarvis.main --api
 ```
 
+Then open `http://127.0.0.1:8000/dashboard`.
+
 4. Submit a command:
 
 ```powershell
@@ -40,6 +43,29 @@ curl -X POST http://127.0.0.1:8000/command -H "Content-Type: application/json" -
 
 Install `requirements-optional.txt` to enable heavier voice, vision, and UI integrations such as Porcupine, Whisper, OpenCV, and PyQt.
 
+## Run Without API Dependencies
+
+The core runtime can execute one-shot commands without FastAPI or Uvicorn:
+
+```powershell
+python -m jarvis.main --once "Jarvis remember that my favorite editor is VS Code"
+python -m jarvis.main --once "What did I say about editor"
+```
+
+## Validation
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+## Realtime Ops
+
+- Browser dashboard: `/dashboard`
+- Server-sent event stream: `/stream/events`
+- WebSocket event stream: `/ws/events`
+- Job inspection: `GET /jobs`
+- Job cancellation: `POST /jobs/{job_id}/cancel`
+
 ## Architecture
 
 The runtime is organized under `jarvis/`:
@@ -48,6 +74,8 @@ The runtime is organized under `jarvis/`:
 - `brain`: task planning and reasoning loops
 - `agents`: specialist agents coordinated by the commander
 - `memory`: long-term storage and semantic recall
+- `brain/intelligence.py`: local-first reasoning providers and summarization
+- `brain/learning.py`: adaptive behavior tracking and insights
 - `voice`: wake word, VAD, STT, TTS, and orchestration
 - `vision`: OCR and visual context extraction
 - `system_control`: safe OS and shell integration
@@ -78,5 +106,5 @@ By default JARVIS stores runtime data under `.jarvis_runtime/` in the project ro
 ## Next Steps
 
 - Configure API keys or external providers in `jarvis/config/settings.yaml`
-- Extend `jarvis/plugins/base.py` to add new capabilities
+- Extend `jarvis/plugins/base.py` and `jarvis/plugins/sdk.py` to add new capabilities
 - Replace fallback providers with GPU-backed local or cloud models

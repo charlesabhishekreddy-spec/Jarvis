@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
-
-from dateutil import parser as date_parser
 
 from jarvis.core.models import CommandRequest, TaskPlan, TaskStep
 
@@ -19,9 +18,14 @@ RECALL_PATTERN = re.compile(r"(?:recall|what do you know about|what did i say ab
 OPEN_PATTERN = re.compile(r"(?:open|launch)\s+(.+)", re.IGNORECASE)
 WEATHER_PATTERN = re.compile(r"weather(?:\s+in)?\s+(.+)", re.IGNORECASE)
 NEWS_PATTERN = re.compile(r"(?:news|latest)\s+(?:about\s+)?(.+)", re.IGNORECASE)
+STATUS_PATTERN = re.compile(r"(?:status|health|resources)", re.IGNORECASE)
+TOOLS_PATTERN = re.compile(r"(?:tools|capabilities|what can you do)", re.IGNORECASE)
 
 
 class TaskPlanner:
+    def __init__(self, workspace_root: str | None = None) -> None:
+        self.workspace_root = Path(workspace_root).resolve() if workspace_root else Path.cwd().resolve()
+
     def create_plan(self, request: CommandRequest) -> TaskPlan:
         text = self._normalize(request.text)
         steps = self._build_steps(text)
@@ -128,6 +132,26 @@ class TaskPlanner:
                 )
             ]
 
+        if STATUS_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Inspect system status",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "resource_usage"},
+                )
+            ]
+
+        if TOOLS_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Describe available tools",
+                    description=text,
+                    agent_hint="commander",
+                    metadata={"include_tools": True},
+                )
+            ]
+
         open_match = OPEN_PATTERN.search(text)
         if open_match:
             target = open_match.group(1).strip()
@@ -142,7 +166,7 @@ class TaskPlanner:
 
         if any(word in text.lower() for word in ("report", "research", "prepare")):
             slug = self._slugify(text)[:50]
-            output_path = Path.cwd() / "reports" / f"{slug or uuid4().hex}.md"
+            output_path = self.workspace_root / "reports" / f"{slug or uuid4().hex}.md"
             return [
                 TaskStep(
                     title="Research topic",
@@ -189,13 +213,44 @@ class TaskPlanner:
         ]
 
     def _normalize_time(self, raw: str) -> str:
-        parsed = date_parser.parse(raw.strip())
-        return parsed.strftime("%H:%M:%S")
+        value = raw.strip().lower()
+        formats = ("%H:%M:%S", "%H:%M", "%I%p", "%I:%M%p", "%I %p", "%I:%M %p")
+        normalized = value.replace(" ", "")
+        for fmt in formats:
+            try:
+                return datetime.strptime(normalized, fmt).strftime("%H:%M:%S")
+            except ValueError:
+                continue
+        raise ValueError(f"Unsupported time format: {raw}")
 
     def _extract_iso_datetime(self, text: str) -> str | None:
         iso_match = re.search(r"\d{4}-\d{2}-\d{2}[tT ]\d{2}:\d{2}(?::\d{2})?", text)
         if iso_match:
             return iso_match.group(0).replace(" ", "T")
+        tomorrow_match = re.search(r"tomorrow\s+at\s+([0-2]?\d(?::[0-5]\d)?\s*(?:am|pm)?)", text, re.IGNORECASE)
+        if tomorrow_match:
+            target = datetime.now(timezone.utc) + timedelta(days=1)
+            hour, minute, second = [int(part) for part in self._normalize_time(tomorrow_match.group(1)).split(":")]
+            return target.replace(hour=hour, minute=minute, second=second, microsecond=0).isoformat()
+        relative_match = re.search(r"in\s+(\d+)\s+(minute|minutes|hour|hours|day|days)", text, re.IGNORECASE)
+        if relative_match:
+            count = int(relative_match.group(1))
+            unit = relative_match.group(2).lower()
+            if "hour" in unit:
+                delta = timedelta(hours=count)
+            elif "day" in unit:
+                delta = timedelta(days=count)
+            else:
+                delta = timedelta(minutes=count)
+            return (datetime.now(timezone.utc) + delta).replace(microsecond=0).isoformat()
+        at_match = re.search(r"\bat\s+([0-2]?\d(?::[0-5]\d)?\s*(?:am|pm)?)", text, re.IGNORECASE)
+        if at_match:
+            now = datetime.now(timezone.utc)
+            hour, minute, second = [int(part) for part in self._normalize_time(at_match.group(1)).split(":")]
+            target = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            return target.isoformat()
         return None
 
     def _slugify(self, text: str) -> str:

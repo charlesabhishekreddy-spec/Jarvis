@@ -25,6 +25,8 @@ class ToolRegistry:
         ]
 
     async def execute(self, name: str, context: JarvisContext, **kwargs: Any) -> dict[str, Any]:
+        if name not in self._tools:
+            return {"ok": False, "error": f"Tool not found: {name}"}
         tool = self._tools[name]
         decision = context.security.authorize_tool(name)
         if not decision.allowed:

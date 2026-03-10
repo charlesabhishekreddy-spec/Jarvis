@@ -28,6 +28,8 @@ class CoderAgent(BaseAgent):
                 workdir=step.metadata.get("workdir"),
             )
             return {"message": f"Executed development command with status {result['result']['returncode']}.", "result": result}
-        return {
-            "message": "Coder agent prepared a development-oriented response. Connect an LLM-backed coding model for autonomous code generation.",
-        }
+        response = await context.intelligence.respond(
+            prompt=f"Provide a coding-oriented plan for: {request.text}",
+            context={"plan": plan.to_dict(), "results": [candidate.result for candidate in plan.steps if candidate.result]},
+        )
+        return {"message": response.text, "provider": response.provider}

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
-
-import httpx
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 from jarvis.core.service import Service
 
@@ -18,13 +20,7 @@ class WebIntelligenceService(Service):
 
     async def search(self, query: str) -> list[dict[str, Any]]:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    "https://api.duckduckgo.com/",
-                    params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
-                )
-                response.raise_for_status()
-                payload = response.json()
+            payload = await asyncio.to_thread(self._fetch_payload, query)
         except Exception as exc:
             return [
                 {
@@ -34,6 +30,7 @@ class WebIntelligenceService(Service):
                     "source": "fallback",
                 }
             ]
+
         results: list[dict[str, Any]] = []
         abstract = payload.get("AbstractText")
         if abstract:
@@ -65,3 +62,8 @@ class WebIntelligenceService(Service):
                 }
             )
         return results
+
+    def _fetch_payload(self, query: str) -> dict[str, Any]:
+        encoded = urllib_parse.urlencode({"q": query, "format": "json", "no_html": 1, "skip_disambig": 1})
+        with urllib_request.urlopen(f"https://api.duckduckgo.com/?{encoded}", timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))

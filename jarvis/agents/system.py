@@ -29,6 +29,8 @@ class SystemAgent(BaseAgent):
                 path=step.metadata["path"],
                 content=step.metadata["content"],
             )
+            if not result.get("ok", False):
+                return {"message": result.get("error", f"Failed to save file to {step.metadata['path']}."), "result": result}
             return {"message": f"Saved file to {result.get('path', step.metadata['path'])}.", "result": result}
         if action == "shell":
             result = await context.tools.execute(

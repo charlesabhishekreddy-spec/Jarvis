@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
-
-import httpx
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 
 class WeatherService:
@@ -12,10 +14,7 @@ class WeatherService:
     async def get_weather(self, location: str) -> dict[str, Any]:
         if not self.api_key:
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.get(f"https://wttr.in/{location}", params={"format": "j1"})
-                    response.raise_for_status()
-                    payload = response.json()
+                payload = await asyncio.to_thread(self._fetch_wttr_payload, location)
                 current = payload["current_condition"][0]
                 return {
                     "location": location,
@@ -25,13 +24,7 @@ class WeatherService:
             except Exception as exc:
                 return {"location": location, "temperature_c": None, "description": f"Weather lookup failed: {exc}"}
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    "https://api.openweathermap.org/data/2.5/weather",
-                    params={"q": location, "appid": self.api_key, "units": "metric"},
-                )
-                response.raise_for_status()
-                payload = response.json()
+            payload = await asyncio.to_thread(self._fetch_openweather_payload, location)
             return {
                 "location": payload.get("name", location),
                 "temperature_c": payload.get("main", {}).get("temp"),
@@ -39,3 +32,13 @@ class WeatherService:
             }
         except Exception as exc:
             return {"location": location, "temperature_c": None, "description": f"Weather lookup failed: {exc}"}
+
+    def _fetch_wttr_payload(self, location: str) -> dict[str, Any]:
+        encoded_location = urllib_parse.quote(location)
+        with urllib_request.urlopen(f"https://wttr.in/{encoded_location}?format=j1", timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _fetch_openweather_payload(self, location: str) -> dict[str, Any]:
+        encoded = urllib_parse.urlencode({"q": location, "appid": self.api_key, "units": "metric"})
+        with urllib_request.urlopen(f"https://api.openweathermap.org/data/2.5/weather?{encoded}", timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))

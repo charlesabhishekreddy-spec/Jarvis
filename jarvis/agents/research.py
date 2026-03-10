@@ -28,8 +28,13 @@ class ResearchAgent(BaseAgent):
             lines = [f"- {article['title']}" for article in articles]
             return {"message": "\n".join(lines), "articles": articles}
         results = await context.tools.execute("web.search", context, query=step.metadata.get("query", request.text))
-        snippets = [
-            f"- {item.get('title', 'Result')}: {item.get('snippet', item.get('summary', ''))}"
+        fragments = [
+            f"{item.get('title', 'Result')}: {item.get('snippet', item.get('summary', ''))}"
             for item in results.get("results", [])
         ]
-        return {"message": "\n".join(snippets) or "No research results found.", "results": results.get("results", [])}
+        summary = await context.intelligence.summarize(
+            goal=step.metadata.get("query", request.text),
+            fragments=fragments,
+            context={"results": fragments},
+        )
+        return {"message": summary.text, "results": results.get("results", []), "provider": summary.provider}

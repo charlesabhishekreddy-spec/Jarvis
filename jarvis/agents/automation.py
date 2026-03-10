@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from dateutil import parser as date_parser
-
 from jarvis.core.context import JarvisContext
 from jarvis.core.models import CommandRequest, TaskPlan, TaskStep
 
@@ -40,7 +38,7 @@ class AutomationAgent(BaseAgent):
             target = utc_now() + timedelta(hours=1)
             run_at = target.isoformat()
         else:
-            parsed = date_parser.parse(run_at)
+            parsed = datetime.fromisoformat(run_at.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=timezone.utc)
             run_at = parsed.isoformat()

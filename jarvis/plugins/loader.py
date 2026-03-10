@@ -24,11 +24,14 @@ class PluginLoader(Service):
         for path in sorted(self.plugin_dir.glob("*.py")):
             if path.name.startswith("_"):
                 continue
-            plugin = self._load_from_path(path)
-            if plugin is None:
-                continue
-            await plugin.register(context)
-            self.loaded_plugins.append(plugin)
+            try:
+                plugin = self._load_from_path(path)
+                if plugin is None:
+                    continue
+                await plugin.register(context)
+                self.loaded_plugins.append(plugin)
+            except Exception as exc:
+                self.logger.warning("Failed to load plugin %s: %s", path.name, exc)
 
     def list_plugins(self) -> list[dict[str, Any]]:
         return [

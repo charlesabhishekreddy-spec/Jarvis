@@ -10,7 +10,8 @@ from .planning import TaskPlanner
 class ReasoningEngine:
     def __init__(self, context: JarvisContext) -> None:
         self.context = context
-        self.planner = TaskPlanner()
+        workspace_root = context.settings.security.allowed_workdirs[0] if context.settings.security.allowed_workdirs else None
+        self.planner = TaskPlanner(workspace_root=workspace_root)
         self.agents = AgentManager()
 
     async def execute(self, request: CommandRequest) -> CommandResponse:
@@ -31,27 +32,49 @@ class ReasoningEngine:
         await self.context.bus.publish("task.created", plan.to_dict())
 
         for index, step in enumerate(plan.steps):
-            step.status = TaskStatus.IN_PROGRESS
-            if step.metadata.get("content_from_previous") and index > 0:
-                step.metadata["content"] = plan.steps[index - 1].result or ""
-            await self.context.bus.publish(
-                "task.step.started",
-                {"plan_id": plan.plan_id, "step_id": step.step_id, "title": step.title, "agent_hint": step.agent_hint},
-            )
-            agent = self.agents.select(step.agent_hint, step)
-            result = await agent.handle(step, plan, request, self.context)
-            step.result = result.get("message", "")
-            step.status = TaskStatus.COMPLETED
-            plan.updated_at = utc_now()
-            await self.context.memory.log_activity(
-                category="task.step",
-                message=f"{agent.name} completed {step.title}",
-                details={"plan_id": plan.plan_id, "step_id": step.step_id},
-            )
-            await self.context.bus.publish(
-                "task.step.completed",
-                {"plan_id": plan.plan_id, "step_id": step.step_id, "agent": agent.name, "result": step.result},
-            )
+            try:
+                step.status = TaskStatus.IN_PROGRESS
+                if step.metadata.get("content_from_previous") and index > 0:
+                    step.metadata["content"] = plan.steps[index - 1].result or ""
+                await self.context.bus.publish(
+                    "task.step.started",
+                    {"plan_id": plan.plan_id, "step_id": step.step_id, "title": step.title, "agent_hint": step.agent_hint},
+                )
+                agent = self.agents.select(step.agent_hint, step)
+                result = await agent.handle(step, plan, request, self.context)
+                step.result = result.get("message", "")
+                step.status = TaskStatus.COMPLETED
+                plan.updated_at = utc_now()
+                await self.context.memory.log_activity(
+                    category="task.step",
+                    message=f"{agent.name} completed {step.title}",
+                    details={"plan_id": plan.plan_id, "step_id": step.step_id},
+                )
+                await self.context.bus.publish(
+                    "task.step.completed",
+                    {"plan_id": plan.plan_id, "step_id": step.step_id, "agent": agent.name, "result": step.result},
+                )
+            except Exception as exc:
+                step.status = TaskStatus.FAILED
+                step.result = str(exc)
+                plan.status = TaskStatus.FAILED
+                plan.updated_at = utc_now()
+                await self.context.memory.save_task(plan)
+                await self.context.memory.log_activity(
+                    category="task.step.failed",
+                    message=f"{step.title} failed",
+                    details={"plan_id": plan.plan_id, "step_id": step.step_id, "error": str(exc)},
+                )
+                await self.context.bus.publish(
+                    "task.step.failed",
+                    {"plan_id": plan.plan_id, "step_id": step.step_id, "error": str(exc)},
+                )
+                return CommandResponse(
+                    status=TaskStatus.FAILED,
+                    message=f"{step.title} failed: {exc}",
+                    task_id=plan.plan_id,
+                    data={"plan": plan.to_dict(), "failed_step": step.title},
+                )
 
         plan.status = TaskStatus.COMPLETED
         await self.context.memory.save_task(plan)
@@ -62,6 +85,6 @@ class ReasoningEngine:
             status=TaskStatus.COMPLETED,
             message=final_message,
             task_id=plan.plan_id,
-            data={"plan": plan.to_dict()},
+            data={"plan": plan.to_dict(), "final_step": plan.steps[-1].title},
         )
         return response

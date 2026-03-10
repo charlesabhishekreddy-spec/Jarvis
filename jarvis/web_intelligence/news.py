@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
-
-import httpx
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 
 class NewsService:
@@ -19,13 +21,7 @@ class NewsService:
                 }
             ]
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    "https://newsapi.org/v2/everything",
-                    params={"q": topic, "sortBy": "publishedAt", "pageSize": 5, "apiKey": self.api_key},
-                )
-                response.raise_for_status()
-                payload = response.json()
+            payload = await asyncio.to_thread(self._fetch_payload, topic)
         except Exception as exc:
             return [{"title": f"News lookup failed for {topic}", "url": "", "summary": str(exc)}]
         return [
@@ -36,3 +32,10 @@ class NewsService:
             }
             for article in payload.get("articles", [])
         ]
+
+    def _fetch_payload(self, topic: str) -> dict[str, Any]:
+        encoded = urllib_parse.urlencode(
+            {"q": topic, "sortBy": "publishedAt", "pageSize": 5, "apiKey": self.api_key}
+        )
+        with urllib_request.urlopen(f"https://newsapi.org/v2/everything?{encoded}", timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
