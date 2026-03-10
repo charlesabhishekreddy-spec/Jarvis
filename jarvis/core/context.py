@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from jarvis.automation.scheduler import AutomationService
     from jarvis.memory.service import MemoryService
     from jarvis.plugins.loader import PluginLoader
+    from jarvis.security.confirmations import ConfirmationService
     from jarvis.security.manager import SecurityManager
     from jarvis.system_control.os_controller import SystemController
     from jarvis.tools.registry import ToolRegistry
@@ -35,5 +36,6 @@ class JarvisContext:
     plugins: "PluginLoader"
     intelligence: "IntelligenceService | None" = None
     learning: "AdaptiveLearningService | None" = None
+    confirmations: "ConfirmationService | None" = None
     runtime: "JarvisRuntime | None" = None
     voice: "VoicePipeline | None" = None

@@ -27,6 +27,10 @@
           <span class="metric-label">Memory</span>
           <strong id="runtime-memory">-</strong>
         </div>
+        <div class="metric-card">
+          <span class="metric-label">Queued</span>
+          <strong id="runtime-queued">-</strong>
+        </div>
       </div>
     </header>
 
@@ -40,6 +44,7 @@
           <textarea id="command-input" placeholder="Ask JARVIS to remember, research, schedule, inspect, or automate something." rows="4"></textarea>
           <div class="command-actions">
             <button type="submit">Execute</button>
+            <button type="button" class="ghost" id="queue-command">Queue</button>
             <button type="button" class="ghost" data-command="What can you do">Capabilities</button>
             <button type="button" class="ghost" data-command="Show system status">Status</button>
             <button type="button" class="ghost" data-command="Prepare a report about renewable energy">Report</button>
@@ -65,9 +70,30 @@
 
       <section class="panel">
         <div class="panel-header">
+          <h2>Startup</h2>
+        </div>
+        <div id="startup-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
           <h2>Automation Jobs</h2>
         </div>
         <div id="jobs-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Command Queue</h2>
+        </div>
+        <div id="executions-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Confirmations</h2>
+        </div>
+        <div id="confirmations-list" class="stack-list"></div>
       </section>
 
       <section class="panel wide">

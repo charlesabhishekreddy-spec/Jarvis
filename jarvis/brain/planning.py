@@ -20,11 +20,35 @@ WEATHER_PATTERN = re.compile(r"weather(?:\s+in)?\s+(.+)", re.IGNORECASE)
 NEWS_PATTERN = re.compile(r"(?:news|latest)\s+(?:about\s+)?(.+)", re.IGNORECASE)
 STATUS_PATTERN = re.compile(r"(?:status|health|resources)", re.IGNORECASE)
 TOOLS_PATTERN = re.compile(r"(?:tools|capabilities|what can you do)", re.IGNORECASE)
+STARTUP_STATUS_PATTERN = re.compile(
+    r"(?:startup status|autostart status|boot status|start(?:ing)? on (?:boot|login)|is jarvis set to start)",
+    re.IGNORECASE,
+)
+STARTUP_INSTALL_PATTERN = re.compile(
+    r"(?:enable|install|configure|register|set up).*(?:startup|autostart|start on (?:boot|login))",
+    re.IGNORECASE,
+)
+STARTUP_UNINSTALL_PATTERN = re.compile(
+    r"(?:disable|remove|uninstall|delete).*(?:startup|autostart|start on (?:boot|login))",
+    re.IGNORECASE,
+)
+DESKTOP_STATUS_PATTERN = re.compile(r"(?:desktop status|screen size|automation status|mouse status)", re.IGNORECASE)
+MOUSE_MOVE_PATTERN = re.compile(
+    r"(?:move (?:the )?(?:mouse|cursor)\s+to)\s+(-?\d+)\s*(?:,|\s)\s*(-?\d+)",
+    re.IGNORECASE,
+)
+MOUSE_CLICK_PATTERN = re.compile(
+    r"(?:(double click|right click|middle click|click))(?:\s+at)?\s+(-?\d+)\s*(?:,|\s)\s*(-?\d+)",
+    re.IGNORECASE,
+)
+KEYBOARD_TYPE_PATTERN = re.compile(r"(?:type|enter)\s+(.+)", re.IGNORECASE)
+KEYBOARD_PRESS_PATTERN = re.compile(r"(?:press|hit|shortcut|hotkey)\s+(.+)", re.IGNORECASE)
 
 
 class TaskPlanner:
-    def __init__(self, workspace_root: str | None = None) -> None:
+    def __init__(self, workspace_root: str | None = None, startup_mode: str = "api") -> None:
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else Path.cwd().resolve()
+        self.startup_mode = startup_mode
 
     def create_plan(self, request: CommandRequest) -> TaskPlan:
         text = self._normalize(request.text)
@@ -132,6 +156,157 @@ class TaskPlanner:
                 )
             ]
 
+        if DESKTOP_STATUS_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Inspect desktop automation status",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "desktop_status"},
+                )
+            ]
+
+        mouse_move_match = MOUSE_MOVE_PATTERN.search(text)
+        if mouse_move_match:
+            return [
+                TaskStep(
+                    title="Evaluate mouse automation safety",
+                    description=text,
+                    agent_hint="security",
+                    metadata={"command": text},
+                ),
+                TaskStep(
+                    title="Move mouse cursor",
+                    description=text,
+                    agent_hint="system",
+                    metadata={
+                        "action": "mouse_move",
+                        "x": int(mouse_move_match.group(1)),
+                        "y": int(mouse_move_match.group(2)),
+                        "duration": 0.0,
+                        "requires_confirmation": True,
+                        "risk_level": "high",
+                    },
+                ),
+            ]
+
+        mouse_click_match = MOUSE_CLICK_PATTERN.search(text)
+        if mouse_click_match:
+            button_token = mouse_click_match.group(1).lower()
+            button = "right" if "right" in button_token else "middle" if "middle" in button_token else "left"
+            clicks = 2 if "double" in button_token else 1
+            return [
+                TaskStep(
+                    title="Evaluate mouse click safety",
+                    description=text,
+                    agent_hint="security",
+                    metadata={"command": text},
+                ),
+                TaskStep(
+                    title="Click mouse",
+                    description=text,
+                    agent_hint="system",
+                    metadata={
+                        "action": "mouse_click",
+                        "x": int(mouse_click_match.group(2)),
+                        "y": int(mouse_click_match.group(3)),
+                        "button": button,
+                        "clicks": clicks,
+                        "requires_confirmation": True,
+                        "risk_level": "high",
+                    },
+                ),
+            ]
+
+        keyboard_press_match = KEYBOARD_PRESS_PATTERN.search(text)
+        if keyboard_press_match:
+            keys = self._extract_keys(keyboard_press_match.group(1))
+            return [
+                TaskStep(
+                    title="Evaluate keyboard automation safety",
+                    description=text,
+                    agent_hint="security",
+                    metadata={"command": text},
+                ),
+                TaskStep(
+                    title="Press keyboard keys",
+                    description=text,
+                    agent_hint="system",
+                    metadata={
+                        "action": "keyboard_press",
+                        "keys": keys,
+                        "requires_confirmation": True,
+                        "risk_level": "high",
+                    },
+                ),
+            ]
+
+        keyboard_type_match = KEYBOARD_TYPE_PATTERN.search(text)
+        if keyboard_type_match:
+            return [
+                TaskStep(
+                    title="Evaluate typing safety",
+                    description=text,
+                    agent_hint="security",
+                    metadata={"command": text},
+                ),
+                TaskStep(
+                    title="Type text",
+                    description=text,
+                    agent_hint="system",
+                    metadata={
+                        "action": "keyboard_type",
+                        "text": keyboard_type_match.group(1).strip(),
+                        "interval": 0.0,
+                        "requires_confirmation": True,
+                        "risk_level": "high",
+                    },
+                ),
+            ]
+
+        if STARTUP_STATUS_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Inspect startup registration",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "startup_status", "mode": self._extract_startup_mode(text)},
+                )
+            ]
+
+        if STARTUP_INSTALL_PATTERN.search(text):
+            mode = self._extract_startup_mode(text)
+            return [
+                TaskStep(
+                    title="Evaluate startup configuration safety",
+                    description=text,
+                    agent_hint="security",
+                    metadata={"command": text},
+                ),
+                TaskStep(
+                    title="Install startup registration",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "install_startup", "mode": mode, "requires_confirmation": True, "risk_level": "high"},
+                ),
+            ]
+
+        if STARTUP_UNINSTALL_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Evaluate startup removal safety",
+                    description=text,
+                    agent_hint="security",
+                    metadata={"command": text},
+                ),
+                TaskStep(
+                    title="Remove startup registration",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "uninstall_startup", "requires_confirmation": True, "risk_level": "high"},
+                ),
+            ]
+
         if STATUS_PATTERN.search(text):
             return [
                 TaskStep(
@@ -164,7 +339,7 @@ class TaskPlanner:
                 metadata["application"] = target
             return [TaskStep(title="Open target", description=text, agent_hint="system", metadata=metadata)]
 
-        if any(word in text.lower() for word in ("report", "research", "prepare")):
+        if self._contains_any_term(text, ("report", "research", "prepare")):
             slug = self._slugify(text)[:50]
             output_path = self.workspace_root / "reports" / f"{slug or uuid4().hex}.md"
             return [
@@ -188,27 +363,32 @@ class TaskPlanner:
                 ),
             ]
 
-        if any(word in text.lower() for word in ("run", "execute", "terminal")):
+        if self._contains_any_term(text, ("run", "execute", "terminal")):
             return [
                 TaskStep(
                     title="Evaluate execution safety",
                     description=text,
                     agent_hint="security",
-                    metadata={"command": text},
+                    metadata={"command": self._extract_shell_command(text)},
                 ),
                 TaskStep(
                     title="Run command",
                     description=text,
                     agent_hint="system",
-                    metadata={"action": "shell", "command": text},
+                    metadata={
+                        "action": "shell",
+                        "command": self._extract_shell_command(text),
+                        "requires_confirmation": True,
+                        "risk_level": "high",
+                    },
                 ),
             ]
 
         return [
             TaskStep(
-                title="Respond to request",
+                title="Autonomous request handling",
                 description=text,
-                agent_hint="commander",
+                agent_hint="autonomous",
             )
         ]
 
@@ -255,3 +435,46 @@ class TaskPlanner:
 
     def _slugify(self, text: str) -> str:
         return re.sub(r"[^a-zA-Z0-9]+", "-", text.lower()).strip("-")
+
+    def _contains_any_term(self, text: str, terms: tuple[str, ...]) -> bool:
+        lowered = text.lower()
+        for term in terms:
+            if " " in term:
+                if term in lowered:
+                    return True
+                continue
+            if re.search(rf"\b{re.escape(term)}\b", lowered):
+                return True
+        return False
+
+    def _extract_shell_command(self, text: str) -> str:
+        match = re.match(r"^(?:run|execute)\s+(.+)$", text.strip(), re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        terminal_match = re.match(r"^(?:terminal(?:\s+command)?)\s+(.+)$", text.strip(), re.IGNORECASE)
+        if terminal_match:
+            return terminal_match.group(1).strip()
+        return text.strip()
+
+    def _extract_startup_mode(self, text: str) -> str:
+        lowered = text.lower()
+        if any(token in lowered for token in ("background", "headless", "daemon")):
+            return "background"
+        if any(token in lowered for token in ("api", "dashboard", "web")):
+            return "api"
+        return self.startup_mode
+
+    def _extract_keys(self, raw: str) -> list[str]:
+        cleaned = raw.strip().strip(".")
+        if "+" in cleaned:
+            parts = cleaned.split("+")
+        else:
+            parts = re.split(r"(?:\s*,\s*|\s+)", cleaned)
+        aliases = {
+            "control": "ctrl",
+            "return": "enter",
+            "escape": "esc",
+            "windows": "win",
+        }
+        normalized = [aliases.get(part.lower(), part.lower()) for part in parts if part]
+        return normalized

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .autonomous import AutonomousAgent
 from .automation import AutomationAgent
 from .base import BaseAgent
 from .coder import CoderAgent
@@ -21,6 +22,7 @@ class AgentManager:
             SecurityAgent(),
             SystemAgent(),
             VisionAgent(),
+            AutonomousAgent(),
             CommanderAgent(),
         ]
 

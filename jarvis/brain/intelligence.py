@@ -44,6 +44,13 @@ class GenerationResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class ToolCall:
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    reason: str = ""
+
+
 class ReasoningProvider(ABC):
     name = "provider"
     model = "unknown"
@@ -55,6 +62,15 @@ class ReasoningProvider(ABC):
     async def summarize(self, goal: str, fragments: list[str], context: dict[str, Any] | None = None) -> GenerationResult:
         prompt = f"Goal: {goal}\n\nContext:\n" + "\n".join(f"- {fragment}" for fragment in fragments)
         return await self.respond(prompt, context=context)
+
+    async def plan_tool_usage(
+        self,
+        prompt: str,
+        tools: list[dict[str, Any]],
+        context: dict[str, Any] | None = None,
+        max_calls: int = 3,
+    ) -> list[ToolCall]:
+        return []
 
 
 class HeuristicReasoningProvider(ReasoningProvider):
@@ -118,9 +134,83 @@ class HeuristicReasoningProvider(ReasoningProvider):
             metadata={"fragment_count": len(fragments)},
         )
 
+    async def plan_tool_usage(
+        self,
+        prompt: str,
+        tools: list[dict[str, Any]],
+        context: dict[str, Any] | None = None,
+        max_calls: int = 3,
+    ) -> list[ToolCall]:
+        available = {tool["name"] for tool in tools}
+        normalized = prompt.strip()
+        lowered = normalized.lower()
+        calls: list[ToolCall] = []
+
+        def maybe_add(name: str, arguments: dict[str, Any], reason: str) -> None:
+            if len(calls) >= max_calls or name not in available:
+                return
+            calls.append(ToolCall(name=name, arguments=arguments, reason=reason))
+
+        file_read = re.search(r"(?:read|show|display)\s+(?:the\s+)?file\s+(.+)", normalized, re.IGNORECASE)
+        if file_read:
+            maybe_add("system.read_file", {"path": self._clean_path(file_read.group(1))}, "Read the requested file.")
+            return calls
+
+        open_path = re.search(r"(?:open)\s+(?:the\s+)?(?:file|folder|directory|path)\s+(.+)", normalized, re.IGNORECASE)
+        if open_path:
+            maybe_add("system.open_path", {"path": self._clean_path(open_path.group(1))}, "Open the requested path.")
+            return calls
+
+        find_named = re.search(r"(?:find|search for)\s+files?\s+(?:named\s+)?([^\n]+)", normalized, re.IGNORECASE)
+        if find_named:
+            maybe_add(
+                "system.list_files",
+                {"path": ".", "recursive": True, "limit": 50, "pattern": self._clean_path(find_named.group(1))},
+                "Search the workspace for matching files.",
+            )
+            return calls
+
+        list_files = re.search(r"(?:list|show)\s+(?:the\s+)?(?:files|folders|directory|workspace)(?:\s+in\s+(.+))?", normalized, re.IGNORECASE)
+        if list_files or any(token in lowered for token in ("workspace", "project files", "directory contents")):
+            path = self._clean_path(list_files.group(1)) if list_files and list_files.group(1) else "."
+            maybe_add("system.list_files", {"path": path, "recursive": False, "limit": 50}, "List files in the requested location.")
+            return calls
+
+        if any(token in lowered for token in ("running processes", "process list", "what is running", "running apps")):
+            maybe_add("system.processes", {"limit": 20}, "Inspect active processes.")
+            return calls
+
+        if any(token in lowered for token in ("startup status", "autostart status", "start on boot", "start on login")):
+            maybe_add("system.startup_status", {}, "Check whether JARVIS is configured to start automatically.")
+            return calls
+
+        web_match = re.search(r"(?:search the web for|research|look up|find information about)\s+(.+)", normalized, re.IGNORECASE)
+        if web_match:
+            maybe_add("web.search", {"query": web_match.group(1).strip()}, "Research the requested topic.")
+            return calls
+
+        recall_match = re.search(r"(?:recall|remembered|what do you know about|what did i say about)\s+(.+)", normalized, re.IGNORECASE)
+        if recall_match:
+            maybe_add("memory.recall", {"query": recall_match.group(1).strip(), "limit": 5}, "Search long-term memory.")
+            return calls
+
+        remember_match = re.search(r"remember(?:\s+that)?\s+(.+)", normalized, re.IGNORECASE)
+        if remember_match:
+            maybe_add("memory.remember", {"content": remember_match.group(1).strip(), "category": "general"}, "Store the new fact.")
+            return calls
+
+        if any(token in lowered for token in ("system status", "resource usage", "cpu", "memory usage")):
+            maybe_add("system.processes", {"limit": 10}, "Inspect current process state.")
+            return calls
+
+        return calls
+
     def _default_response(self, prompt: str) -> str:
         normalized = prompt.strip().rstrip(".")
         return f"I understood the request: {normalized}. Connect a local model provider for deeper reasoning."
+
+    def _clean_path(self, value: str) -> str:
+        return value.strip().strip("\"'`").rstrip(".")
 
     def _select_key_points(self, goal: str, fragments: list[str]) -> list[str]:
         sentences = self._collect_sentences(fragments)
@@ -185,6 +275,39 @@ class OllamaReasoningProvider(ReasoningProvider):
             + "\n".join(f"- {fragment}" for fragment in fragments)
         )
         return await self.respond(summary_prompt, context=context)
+
+    async def plan_tool_usage(
+        self,
+        prompt: str,
+        tools: list[dict[str, Any]],
+        context: dict[str, Any] | None = None,
+        max_calls: int = 3,
+    ) -> list[ToolCall]:
+        tool_lines = "\n".join(f"- {tool['name']}: {tool['description']}" for tool in tools)
+        planning_prompt = (
+            "Return only JSON with the shape {\"tool_calls\":[{\"name\":\"tool.name\",\"arguments\":{},\"reason\":\"...\"}]}. "
+            f"Use at most {max_calls} calls.\n\n"
+            f"Available tools:\n{tool_lines}\n\n"
+            f"User request: {prompt}"
+        )
+        result = await self.respond(planning_prompt, context=context)
+        match = re.search(r"\{.*\}", result.text, re.DOTALL)
+        if not match:
+            return []
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return []
+        calls: list[ToolCall] = []
+        for item in payload.get("tool_calls", [])[:max_calls]:
+            name = item.get("name")
+            if not isinstance(name, str):
+                continue
+            arguments = item.get("arguments", {})
+            if not isinstance(arguments, dict):
+                arguments = {}
+            calls.append(ToolCall(name=name, arguments=arguments, reason=str(item.get("reason", ""))))
+        return calls
 
     def _build_prompt(self, prompt: str, context: dict[str, Any]) -> str:
         sections = [
@@ -253,3 +376,18 @@ class IntelligenceService(Service):
         counts = Counter(token for token in normalized if token not in STOPWORDS)
         common = [token for token, _ in counts.most_common(2)]
         return ":".join(common) if common else normalized[0]
+
+    async def plan_tool_usage(
+        self,
+        prompt: str,
+        tools: list[dict[str, Any]],
+        context: dict[str, Any] | None = None,
+        max_calls: int = 3,
+    ) -> list[ToolCall]:
+        try:
+            calls = await self.provider.plan_tool_usage(prompt, tools, context=context, max_calls=max_calls)
+            if calls:
+                return calls
+        except Exception as exc:
+            self.logger.warning("Primary intelligence tool planner failed: %s", exc)
+        return await self.heuristic.plan_tool_usage(prompt, tools, context=context, max_calls=max_calls)

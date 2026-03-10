@@ -8,6 +8,7 @@ from jarvis.automation.scheduler import AutomationService
 from jarvis.brain.reasoning import ReasoningEngine
 from jarvis.memory.service import MemoryService
 from jarvis.plugins.loader import PluginLoader
+from jarvis.security.confirmations import ConfirmationService
 from jarvis.security.manager import SecurityManager
 from jarvis.system_control.os_controller import SystemController
 from jarvis.tools.builtin import register_builtin_tools
@@ -19,8 +20,9 @@ from jarvis.web_intelligence.search import WebIntelligenceService
 from .config import Settings
 from .context import JarvisContext
 from .events import AsyncEventBus
-from .models import CommandRequest, CommandResponse
+from .models import CommandRequest, CommandResponse, TaskStatus
 from .service import Service
+from .task_queue import BackgroundCommandService
 
 
 class JarvisRuntime(Service):
@@ -30,8 +32,10 @@ class JarvisRuntime(Service):
         self.bus = AsyncEventBus()
         self.memory = MemoryService(settings.memory.sqlite_path, settings.memory.semantic_index_path)
         self.security = SecurityManager(settings.security)
-        self.system_controller = SystemController(self.security)
+        self.system_controller = SystemController(self.security, settings)
         self.automation = AutomationService(self.bus, self.memory)
+        self.command_queue = BackgroundCommandService(self.bus, self._execute_request_now)
+        self.confirmations = ConfirmationService(self.memory, self.bus, self.command_queue.submit)
         self.intelligence = IntelligenceService(settings.intelligence)
         self.learning = AdaptiveLearningService(
             memory=self.memory,
@@ -60,6 +64,7 @@ class JarvisRuntime(Service):
             plugins=self.plugins,
             intelligence=self.intelligence,
             learning=self.learning,
+            confirmations=self.confirmations,
             runtime=self,
         )
         self.voice = VoicePipeline(self.context)
@@ -70,6 +75,8 @@ class JarvisRuntime(Service):
             self.security,
             self.system_controller,
             self.automation,
+            self.command_queue,
+            self.confirmations,
             self.intelligence,
             self.learning,
             self.web,
@@ -93,8 +100,20 @@ class JarvisRuntime(Service):
         await super().stop()
 
     async def execute_request(self, request: CommandRequest) -> CommandResponse:
+        return await self._execute_request_now(request)
+
+    async def _execute_request_now(self, request: CommandRequest) -> CommandResponse:
         await self.bus.publish("command.received", {"request_id": request.request_id, "text": request.text, "source": request.source})
         response = await self.reasoning.execute(request)
+        if response.status == TaskStatus.REQUIRES_CONFIRMATION:
+            confirmation = await self.confirmations.create(
+                request=request,
+                risk_level=str(response.data.get("risk_level", "unknown")),
+                reason=response.message,
+                recommended_action=str(response.data.get("recommended_action", "")),
+            )
+            response.data["confirmation_id"] = confirmation.confirmation_id
+            response.data["confirmation"] = confirmation.to_dict()
         await self.memory.save_exchange(request, response)
         await self.learning.capture_interaction(request, response)
         await self.memory.log_activity(
@@ -108,14 +127,23 @@ class JarvisRuntime(Service):
         request = CommandRequest(text=text, source=source, metadata={"confirmed": confirmed})
         return await self.execute_request(request)
 
+    async def submit_text(self, text: str, source: str = "text", confirmed: bool = False) -> dict:
+        request = CommandRequest(text=text, source=source, metadata={"confirmed": confirmed})
+        record = await self.command_queue.submit(request)
+        return record.to_dict()
+
     async def status_snapshot(self) -> dict:
         resources = await self.system_controller.resource_usage()
+        startup = await self.system_controller.startup_status()
         return {
             "runtime": {"state": self.state.value, "env": self.settings.runtime.env},
             "services": [service.status() for service in self.services],
             "plugins": self.plugins.list_plugins(),
             "tools": self.tools.list_tools(),
+            "startup": startup,
             "jobs": await self.automation.snapshot_jobs(),
+            "command_queue": self.command_queue.snapshot(),
+            "confirmations": {"pending": await self.confirmations.list(status="pending", limit=20)},
             "insights": await self.learning.insights(),
             "resources": resources,
         }
@@ -127,4 +155,6 @@ class JarvisRuntime(Service):
             "tasks": await self.memory.recent_tasks(10),
             "conversations": await self.memory.recent_conversations(10),
             "events": self.bus.recent_events(25),
+            "executions": self.command_queue.list(20),
+            "confirmations": await self.confirmations.list(limit=20),
         }

@@ -114,6 +114,24 @@ class SQLiteMemoryStore:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS confirmations (
+                    confirmation_id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    risk_level TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    recommended_action TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT NULL,
+                    decision_note TEXT NULL
+                )
+                """
+            )
             connection.commit()
 
     async def save_conversation(self, request: CommandRequest, response: CommandResponse) -> None:
@@ -487,6 +505,112 @@ class SQLiteMemoryStore:
                 "updated_at": row[7],
                 "last_triggered_at": row[8],
                 "metadata": json.loads(row[9]),
+            }
+            for row in rows
+        ]
+
+    async def save_confirmation(self, confirmation: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._save_confirmation_sync, confirmation)
+
+    def _save_confirmation_sync(self, confirmation: dict[str, Any]) -> None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO confirmations (
+                    confirmation_id, request_id, text, source, risk_level, reason, recommended_action,
+                    metadata_json, status, created_at, resolved_at, decision_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    confirmation["confirmation_id"],
+                    confirmation["request_id"],
+                    confirmation["text"],
+                    confirmation["source"],
+                    confirmation["risk_level"],
+                    confirmation["reason"],
+                    confirmation["recommended_action"],
+                    json.dumps(confirmation.get("metadata", {})),
+                    confirmation["status"],
+                    confirmation["created_at"],
+                    confirmation.get("resolved_at"),
+                    confirmation.get("decision_note"),
+                ),
+            )
+            connection.commit()
+
+    async def get_confirmation(self, confirmation_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._get_confirmation_sync, confirmation_id)
+
+    def _get_confirmation_sync(self, confirmation_id: str) -> dict[str, Any] | None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            row = connection.execute(
+                """
+                SELECT confirmation_id, request_id, text, source, risk_level, reason, recommended_action,
+                       metadata_json, status, created_at, resolved_at, decision_note
+                FROM confirmations
+                WHERE confirmation_id = ?
+                """,
+                (confirmation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "confirmation_id": row[0],
+            "request_id": row[1],
+            "text": row[2],
+            "source": row[3],
+            "risk_level": row[4],
+            "reason": row[5],
+            "recommended_action": row[6],
+            "metadata": json.loads(row[7]),
+            "status": row[8],
+            "created_at": row[9],
+            "resolved_at": row[10],
+            "decision_note": row[11],
+        }
+
+    async def confirmations(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._confirmations_sync, status, limit)
+
+    def _confirmations_sync(self, status: str | None, limit: int) -> list[dict[str, Any]]:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            if status:
+                rows = connection.execute(
+                    """
+                    SELECT confirmation_id, request_id, text, source, risk_level, reason, recommended_action,
+                           metadata_json, status, created_at, resolved_at, decision_note
+                    FROM confirmations
+                    WHERE status = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (status, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT confirmation_id, request_id, text, source, risk_level, reason, recommended_action,
+                           metadata_json, status, created_at, resolved_at, decision_note
+                    FROM confirmations
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        return [
+            {
+                "confirmation_id": row[0],
+                "request_id": row[1],
+                "text": row[2],
+                "source": row[3],
+                "risk_level": row[4],
+                "reason": row[5],
+                "recommended_action": row[6],
+                "metadata": json.loads(row[7]),
+                "status": row[8],
+                "created_at": row[9],
+                "resolved_at": row[10],
+                "decision_note": row[11],
             }
             for row in rows
         ]

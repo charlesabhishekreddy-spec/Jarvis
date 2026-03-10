@@ -24,11 +24,17 @@ class ToolRegistry:
             for tool in self._tools.values()
         ]
 
-    async def execute(self, name: str, context: JarvisContext, **kwargs: Any) -> dict[str, Any]:
+    async def execute(self, name: str, context: JarvisContext, confirmed: bool = False, **kwargs: Any) -> dict[str, Any]:
         if name not in self._tools:
             return {"ok": False, "error": f"Tool not found: {name}"}
         tool = self._tools[name]
         decision = context.security.authorize_tool(name)
         if not decision.allowed:
             return {"ok": False, "error": decision.reason}
+        if tool.spec.requires_confirmation and not confirmed:
+            return {
+                "ok": False,
+                "error": f"Confirmation required for tool {name}.",
+                "requires_confirmation": True,
+            }
         return await tool.execute(context, **kwargs)

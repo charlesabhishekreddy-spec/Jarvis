@@ -11,7 +11,7 @@ class ReasoningEngine:
     def __init__(self, context: JarvisContext) -> None:
         self.context = context
         workspace_root = context.settings.security.allowed_workdirs[0] if context.settings.security.allowed_workdirs else None
-        self.planner = TaskPlanner(workspace_root=workspace_root)
+        self.planner = TaskPlanner(workspace_root=workspace_root, startup_mode=context.settings.startup.default_mode)
         self.agents = AgentManager()
 
     async def execute(self, request: CommandRequest) -> CommandResponse:
@@ -27,6 +27,10 @@ class ReasoningEngine:
             )
 
         plan = self.planner.create_plan(request)
+        plan_confirmation = self._plan_confirmation_requirement(plan, request)
+        if plan_confirmation is not None:
+            return plan_confirmation
+
         plan.status = TaskStatus.IN_PROGRESS
         await self.context.memory.save_task(plan)
         await self.context.bus.publish("task.created", plan.to_dict())
@@ -88,3 +92,22 @@ class ReasoningEngine:
             data={"plan": plan.to_dict(), "final_step": plan.steps[-1].title},
         )
         return response
+
+    def _plan_confirmation_requirement(self, plan: TaskPlan, request: CommandRequest) -> CommandResponse | None:
+        if request.metadata.get("confirmed"):
+            return None
+        for step in plan.steps:
+            if not step.metadata.get("requires_confirmation"):
+                continue
+            risk_level = str(step.metadata.get("risk_level", "high"))
+            return CommandResponse(
+                status=TaskStatus.REQUIRES_CONFIRMATION,
+                message=f"{step.title} requires confirmation before execution.",
+                data={
+                    "risk_level": risk_level,
+                    "recommended_action": "Ask the user for explicit confirmation before executing the requested action.",
+                    "plan": plan.to_dict(),
+                    "sensitive_step": step.title,
+                },
+            )
+        return None

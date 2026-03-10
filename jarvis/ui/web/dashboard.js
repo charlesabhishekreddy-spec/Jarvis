@@ -6,14 +6,19 @@ const state = {
 const runtimeState = document.getElementById("runtime-state");
 const runtimeCpu = document.getElementById("runtime-cpu");
 const runtimeMemory = document.getElementById("runtime-memory");
+const runtimeQueued = document.getElementById("runtime-queued");
 const commandForm = document.getElementById("command-form");
 const commandInput = document.getElementById("command-input");
 const commandOutput = document.getElementById("command-output");
 const commandStatus = document.getElementById("command-status");
+const queueButton = document.getElementById("queue-command");
 const eventIndicator = document.getElementById("event-indicator");
 const eventStream = document.getElementById("event-stream");
 const servicesGrid = document.getElementById("services-grid");
+const startupList = document.getElementById("startup-list");
 const jobsList = document.getElementById("jobs-list");
+const executionsList = document.getElementById("executions-list");
+const confirmationsList = document.getElementById("confirmations-list");
 const tasksList = document.getElementById("tasks-list");
 const insightsList = document.getElementById("insights-list");
 const toolsList = document.getElementById("tools-list");
@@ -50,11 +55,33 @@ async function sendCommand(text) {
   }
 }
 
+async function queueCommand(text) {
+  commandStatus.textContent = "Queued";
+  commandStatus.className = "badge neutral";
+  commandOutput.textContent = "Submitting command to background queue...";
+
+  try {
+    const response = await fetch("/command/async", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, confirmed: true }),
+    });
+    const payload = await response.json();
+    commandOutput.textContent = `Queued ${payload.request_id}\n\n${payload.text}`;
+    await refresh();
+  } catch (error) {
+    commandStatus.textContent = "Error";
+    commandStatus.className = "badge warn";
+    commandOutput.textContent = String(error);
+  }
+}
+
 function renderStatus(payload) {
   const status = payload.status;
   runtimeState.textContent = status.runtime.state;
   runtimeCpu.textContent = status.resources.cpu_percent == null ? "-" : `${status.resources.cpu_percent}%`;
   runtimeMemory.textContent = status.resources.memory_percent == null ? "-" : `${status.resources.memory_percent}%`;
+  runtimeQueued.textContent = `${status.command_queue.queued}/${status.command_queue.running}`;
 
   servicesGrid.innerHTML = status.services
     .map(
@@ -67,8 +94,18 @@ function renderStatus(payload) {
     )
     .join("");
 
+  startupList.innerHTML = renderStartup(status.startup);
+
   jobsList.innerHTML = (status.jobs.length ? status.jobs : [{ message: "No automation jobs scheduled.", status: "idle" }])
     .map((job) => renderJob(job))
+    .join("");
+
+  executionsList.innerHTML = (payload.executions.length ? payload.executions : [{ text: "No queued executions yet.", status: "idle" }])
+    .map((execution) => renderExecution(execution))
+    .join("");
+
+  confirmationsList.innerHTML = (payload.confirmations.length ? payload.confirmations : [{ text: "No pending confirmations.", status: "idle" }])
+    .map((confirmation) => renderConfirmation(confirmation))
     .join("");
 
   tasksList.innerHTML = (payload.tasks.length ? payload.tasks : [{ goal: "No task history yet.", status: "idle", steps: [] }])
@@ -118,15 +155,85 @@ function renderJob(job) {
   `;
 }
 
+function renderStartup(startup) {
+  if (!startup) {
+    return `
+      <article class="stack-item">
+        <span class="stack-title">Startup status unavailable.</span>
+      </article>
+    `;
+  }
+
+  const state = startup.installed ? "Installed" : "Not installed";
+  const details = startup.details || {};
+  const extra = [
+    startup.message,
+    details.status ? `Task: ${details.status}` : "",
+    details.last_result ? `Last result: ${details.last_result}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const actions = startup.supported
+    ? `
+        <button class="inline-action ghost" data-startup-action="install" data-startup-mode="api">Install API</button>
+        <button class="inline-action ghost" data-startup-action="install" data-startup-mode="background">Install Background</button>
+        <button class="inline-action ghost" data-startup-action="uninstall">Remove</button>
+      `
+    : "";
+
+  return `
+    <article class="stack-item">
+      <span class="stack-title">${state}</span>
+      <span class="stack-meta">${startup.platform} Â· ${startup.mode} Â· ${startup.task_name}</span>
+      <span class="stack-meta">${extra || "No startup details available."}</span>
+      ${actions}
+    </article>
+  `;
+}
+
+function renderExecution(execution) {
+  const cancelButton =
+    execution.status === "queued" || execution.status === "in_progress"
+      ? `<button class="inline-action ghost" data-request-id="${execution.request_id}">Cancel</button>`
+      : "";
+
+  return `
+    <article class="stack-item">
+      <span class="stack-title">${execution.text}</span>
+      <span class="stack-meta">${execution.status} · queued ${formatTime(execution.queued_at)}</span>
+      <span class="stack-meta">${execution.message || execution.error || "Awaiting execution output."}</span>
+      ${cancelButton}
+    </article>
+  `;
+}
+
 function renderTask(task) {
-  const steps = (task.steps || [])
-    .map((step) => `${step.title} [${step.status}]`)
-    .join(" · ");
+  const steps = (task.steps || []).map((step) => `${step.title} [${step.status}]`).join(" · ");
   return `
     <article class="stack-item">
       <span class="stack-title">${task.goal}</span>
       <span class="stack-meta">${task.status}</span>
       <span class="stack-meta">${steps || "No steps recorded."}</span>
+    </article>
+  `;
+}
+
+function renderConfirmation(confirmation) {
+  const actions =
+    confirmation.status === "pending"
+      ? `
+          <button class="inline-action ghost" data-confirmation-id="${confirmation.confirmation_id}" data-decision="approve">Approve</button>
+          <button class="inline-action ghost" data-confirmation-id="${confirmation.confirmation_id}" data-decision="reject">Reject</button>
+        `
+      : "";
+
+  return `
+    <article class="stack-item">
+      <span class="stack-title">${confirmation.text || "Confirmation"}</span>
+      <span class="stack-meta">${confirmation.risk_level || "unknown"} · ${confirmation.status}</span>
+      <span class="stack-meta">${confirmation.reason || "No reason provided."}</span>
+      ${actions}
     </article>
   `;
 }
@@ -188,6 +295,44 @@ function bindCancelActions() {
       await refresh();
     });
   });
+
+  document.querySelectorAll("[data-request-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const requestId = button.getAttribute("data-request-id");
+      await fetch(`/commands/${requestId}/cancel`, { method: "POST" });
+      await refresh();
+    });
+  });
+
+  document.querySelectorAll("[data-confirmation-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const confirmationId = button.getAttribute("data-confirmation-id");
+      const decision = button.getAttribute("data-decision");
+      await fetch(`/confirmations/${confirmationId}/${decision}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      await refresh();
+    });
+  });
+
+  document.querySelectorAll("[data-startup-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const action = button.getAttribute("data-startup-action");
+      if (action === "install") {
+        const mode = button.getAttribute("data-startup-mode") || "api";
+        await fetch("/startup/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode }),
+        });
+      } else {
+        await fetch("/startup/uninstall", { method: "POST" });
+      }
+      await refresh();
+    });
+  });
 }
 
 function connectEvents() {
@@ -217,10 +362,7 @@ function formatTime(value) {
 }
 
 function escapeHtml(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 async function refresh() {
@@ -239,6 +381,12 @@ commandForm.addEventListener("submit", async (event) => {
   const text = commandInput.value.trim();
   if (!text) return;
   await sendCommand(text);
+});
+
+queueButton.addEventListener("click", async () => {
+  const text = commandInput.value.trim();
+  if (!text) return;
+  await queueCommand(text);
 });
 
 document.querySelectorAll("[data-command]").forEach((button) => {

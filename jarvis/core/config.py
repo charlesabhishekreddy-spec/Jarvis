@@ -65,6 +65,12 @@ class IntelligenceSettings:
 
 
 @dataclass(slots=True)
+class StartupSettings:
+    task_name: str = "JARVIS"
+    default_mode: str = "api"
+
+
+@dataclass(slots=True)
 class LearningSettings:
     enabled: bool = True
     auto_extract_preferences: bool = True
@@ -84,6 +90,7 @@ class Settings:
     security: SecuritySettings = field(default_factory=SecuritySettings)
     api_keys: APIKeys = field(default_factory=APIKeys)
     intelligence: IntelligenceSettings = field(default_factory=IntelligenceSettings)
+    startup: StartupSettings = field(default_factory=StartupSettings)
     learning: LearningSettings = field(default_factory=LearningSettings)
     ui: UISettings = field(default_factory=UISettings)
 
@@ -109,6 +116,7 @@ def _as_settings(data: dict[str, Any]) -> Settings:
         security=SecuritySettings(**data.get("security", {})),
         api_keys=APIKeys(**data.get("api_keys", {})),
         intelligence=IntelligenceSettings(**data.get("intelligence", {})),
+        startup=StartupSettings(**data.get("startup", {})),
         learning=LearningSettings(**data.get("learning", {})),
         ui=UISettings(**data.get("ui", {})),
     )
@@ -143,6 +151,8 @@ def load_settings(path: str | None = None) -> Settings:
     data["intelligence"]["provider"] = os.getenv("JARVIS_INTELLIGENCE_PROVIDER", data["intelligence"]["provider"])
     data["intelligence"]["model"] = os.getenv("JARVIS_INTELLIGENCE_MODEL", data["intelligence"]["model"])
     data["intelligence"]["endpoint"] = os.getenv("JARVIS_INTELLIGENCE_ENDPOINT", data["intelligence"]["endpoint"])
+    data["startup"]["task_name"] = os.getenv("JARVIS_STARTUP_TASK_NAME", data["startup"]["task_name"])
+    data["startup"]["default_mode"] = os.getenv("JARVIS_STARTUP_MODE", data["startup"]["default_mode"])
     data["learning"]["enabled"] = os.getenv("JARVIS_LEARNING_ENABLED", str(data["learning"]["enabled"])).lower() == "true"
     settings = _as_settings(data)
     root = package_root.parent

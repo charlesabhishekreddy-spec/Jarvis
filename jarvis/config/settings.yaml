@@ -34,6 +34,10 @@ intelligence:
   endpoint: http://127.0.0.1:11434/api/generate
   timeout_seconds: 20
 
+startup:
+  task_name: JARVIS
+  default_mode: api
+
 learning:
   enabled: true
   auto_extract_preferences: true

@@ -28,6 +28,8 @@ HIGH_PATTERNS = [
         r"\bwmic\b",
         r"\bsubprocess\b",
         r"\bexecute\b",
+        r"\b(?:enable|install|configure|register|set up)\b.*\b(?:startup|autostart)\b",
+        r"\b(?:disable|remove|uninstall|delete)\b.*\b(?:startup|autostart)\b",
     )
 ]
 

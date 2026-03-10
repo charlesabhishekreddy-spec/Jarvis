@@ -111,6 +111,15 @@ class MemoryService(Service):
     async def automation_jobs(self, status: str | None = None, limit: int = 100) -> list[dict]:
         return await self.sqlite.automation_jobs(status=status, limit=limit)
 
+    async def save_confirmation(self, confirmation: dict) -> None:
+        await self.sqlite.save_confirmation(confirmation)
+
+    async def get_confirmation(self, confirmation_id: str) -> dict | None:
+        return await self.sqlite.get_confirmation(confirmation_id)
+
+    async def confirmations(self, status: str | None = None, limit: int = 100) -> list[dict]:
+        return await self.sqlite.confirmations(status=status, limit=limit)
+
     def _node_key(self, node_type: str, value: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.lower()).strip("_")
         return f"{node_type}:{slug}"
