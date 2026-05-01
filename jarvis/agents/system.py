@@ -12,7 +12,7 @@ from .base import BaseAgent
 class SystemAgent(BaseAgent):
     name = "system"
     description = "Interacts with the operating system and local files."
-    keywords = ("open", "launch", "terminal", "file", "save", "application")
+    keywords = ("open", "launch", "terminal", "file", "save", "application", "process", "app")
 
     async def handle(
         self,
@@ -45,9 +45,57 @@ class SystemAgent(BaseAgent):
             if not result.get("ok", False):
                 return {"message": result.get("error", "Shell execution failed."), "result": result}
             return {"message": result["result"]["stdout"] or result["result"]["stderr"], "result": result}
+        if action == "list_processes":
+            result = await context.tools.execute(
+                "system.processes",
+                context,
+                confirmed=confirmed,
+                limit=step.metadata.get("limit", 20),
+                query=step.metadata.get("query"),
+            )
+            if not result.get("ok", False):
+                return {"message": result.get("error", "Process listing failed."), "result": result}
+            processes = result.get("processes", [])
+            if not processes:
+                return {"message": "No matching processes were found.", "result": result}
+            summary = ", ".join(f"{item['name']} ({item['pid']})" for item in processes[:10])
+            return {"message": f"Running processes: {summary}", "result": result}
+        if action == "terminate_process":
+            result = await context.tools.execute(
+                "system.terminate_process",
+                context,
+                confirmed=confirmed,
+                pid=step.metadata.get("pid"),
+                process_name=step.metadata.get("process_name"),
+            )
+            return {"message": result.get("message", result.get("error", "Process termination failed.")), "result": result}
         if action == "desktop_status":
             result = await context.tools.execute("system.desktop_status", context, confirmed=confirmed)
             return {"message": result.get("message", result.get("error", "Desktop status unavailable.")), "result": result}
+        if action == "list_windows":
+            result = await context.tools.execute(
+                "system.windows",
+                context,
+                confirmed=confirmed,
+                limit=step.metadata.get("limit", 20),
+                query=step.metadata.get("query"),
+            )
+            if not result.get("ok", False):
+                return {"message": result.get("error", "Window listing failed."), "result": result}
+            windows = result.get("windows", [])
+            if not windows:
+                return {"message": "No matching windows were found.", "result": result}
+            summary = ", ".join(str(window["title"]) for window in windows[:10])
+            return {"message": f"Windows: {summary}", "result": result}
+        if action == "focus_window":
+            result = await context.tools.execute("system.window_focus", context, confirmed=confirmed, title=step.metadata["title"])
+            return {"message": result.get("message", result.get("error", "Window focus failed.")), "result": result}
+        if action == "minimize_window":
+            result = await context.tools.execute("system.window_minimize", context, confirmed=confirmed, title=step.metadata["title"])
+            return {"message": result.get("message", result.get("error", "Window minimize failed.")), "result": result}
+        if action == "maximize_window":
+            result = await context.tools.execute("system.window_maximize", context, confirmed=confirmed, title=step.metadata["title"])
+            return {"message": result.get("message", result.get("error", "Window maximize failed.")), "result": result}
         if action == "mouse_move":
             result = await context.tools.execute(
                 "system.mouse_move",

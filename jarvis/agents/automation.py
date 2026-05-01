@@ -21,6 +21,50 @@ class AutomationAgent(BaseAgent):
         request: CommandRequest,
         context: JarvisContext,
     ) -> dict[str, Any]:
+        operation = step.metadata.get("operation")
+        if operation == "workflow_create":
+            workflow = await context.orchestration.create_workflow(
+                title=step.metadata.get("title", request.text),
+                commands=step.metadata.get("commands", [request.text]),
+                goal_id=step.metadata.get("goal_id"),
+                metadata={"source": request.source},
+            )
+            return {
+                "message": f"Created workflow '{workflow['title']}' with {len(workflow['steps'])} steps.",
+                "workflow": workflow,
+            }
+        if operation == "workflows":
+            workflows = await context.orchestration.workflows(limit=step.metadata.get("limit", 10))
+            return {
+                "message": "\n".join(
+                    f"- {workflow['title']} [{workflow['status']}]: {len(workflow['steps'])} steps"
+                    for workflow in workflows
+                )
+                or "No workflows are stored yet.",
+                "workflows": workflows,
+            }
+        if operation == "workflow_run":
+            workflow = await context.memory.find_workflow(
+                step.metadata.get("title", request.text),
+                statuses=["pending", "queued", "in_progress", "failed", "requires_confirmation", "completed", "cancelled"],
+            )
+            if workflow is None:
+                return {"message": "Workflow not found."}
+            result = await context.orchestration.run_workflow(workflow["workflow_id"])
+            if not result.get("ok", False):
+                return {"message": result.get("error", "Workflow could not be started.")}
+            workflow = result["workflow"]
+            return {"message": f"Workflow '{workflow['title']}' is queued.", "workflow": workflow}
+        if operation == "workflow_cancel":
+            workflow = await context.memory.find_workflow(step.metadata.get("title", request.text))
+            if workflow is None:
+                return {"message": "Workflow not found."}
+            result = await context.orchestration.cancel_workflow(workflow["workflow_id"])
+            if not result.get("ok", False):
+                return {"message": result.get("error", "Workflow could not be cancelled.")}
+            workflow = result["workflow"]
+            return {"message": f"Workflow '{workflow['title']}' cancelled.", "workflow": workflow}
+
         schedule_type = step.metadata.get("schedule_type", "once")
         message = step.metadata.get("message", request.text)
         if schedule_type == "daily":

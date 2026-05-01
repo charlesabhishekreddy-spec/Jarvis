@@ -37,6 +37,8 @@ class ReasoningEngine:
 
         for index, step in enumerate(plan.steps):
             try:
+                if not self._dependencies_satisfied(plan, step):
+                    raise RuntimeError(f"Dependencies not satisfied for step '{step.title}'.")
                 step.status = TaskStatus.IN_PROGRESS
                 if step.metadata.get("content_from_previous") and index > 0:
                     step.metadata["content"] = plan.steps[index - 1].result or ""
@@ -49,6 +51,7 @@ class ReasoningEngine:
                 step.result = result.get("message", "")
                 step.status = TaskStatus.COMPLETED
                 plan.updated_at = utc_now()
+                await self.context.memory.save_task(plan)
                 await self.context.memory.log_activity(
                     category="task.step",
                     message=f"{agent.name} completed {step.title}",
@@ -111,3 +114,13 @@ class ReasoningEngine:
                 },
             )
         return None
+
+    def _dependencies_satisfied(self, plan: TaskPlan, step: TaskStep) -> bool:
+        if not step.depends_on:
+            return True
+        completed = {
+            candidate.step_id
+            for candidate in plan.steps
+            if candidate.status == TaskStatus.COMPLETED
+        }
+        return all(dependency in completed for dependency in step.depends_on)

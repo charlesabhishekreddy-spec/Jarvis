@@ -51,6 +51,26 @@ class ToolCall:
     reason: str = ""
 
 
+def _extract_tool_calls_from_text(text: str, max_calls: int) -> list[ToolCall]:
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return []
+    try:
+        payload = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return []
+    calls: list[ToolCall] = []
+    for item in payload.get("tool_calls", [])[:max_calls]:
+        name = item.get("name")
+        if not isinstance(name, str):
+            continue
+        arguments = item.get("arguments", {})
+        if not isinstance(arguments, dict):
+            arguments = {}
+        calls.append(ToolCall(name=name, arguments=arguments, reason=str(item.get("reason", ""))))
+    return calls
+
+
 class ReasoningProvider(ABC):
     name = "provider"
     model = "unknown"
@@ -80,14 +100,27 @@ class HeuristicReasoningProvider(ReasoningProvider):
     async def respond(self, prompt: str, context: dict[str, Any] | None = None) -> GenerationResult:
         context = context or {}
         memories = context.get("memories", [])
+        projects = context.get("projects", [])
+        goals = context.get("goals", [])
         plan = context.get("plan")
         results = context.get("results", [])
         reply_lines: list[str] = []
+
+        if projects:
+            reply_lines.append("Active project context:")
+            reply_lines.extend(f"- {item['project_name']}: {item['summary']}" for item in projects[:2])
 
         if memories:
             memory_lines = [f"- {item['content']}" for item in memories[:3]]
             reply_lines.append("Relevant memory:")
             reply_lines.extend(memory_lines)
+
+        if goals:
+            reply_lines.append("Active goals:")
+            reply_lines.extend(
+                f"- {item['title']}: {item.get('next_action') or item.get('detail', '')}"
+                for item in goals[:3]
+            )
 
         if results:
             reply_lines.append("Latest findings:")
@@ -104,7 +137,12 @@ class HeuristicReasoningProvider(ReasoningProvider):
             text="\n".join(reply_lines).strip(),
             provider=self.name,
             model=self.model,
-            metadata={"memory_count": len(memories), "result_count": len(results)},
+            metadata={
+                "memory_count": len(memories),
+                "result_count": len(results),
+                "project_count": len(projects),
+                "goal_count": len(goals),
+            },
         )
 
     async def summarize(self, goal: str, fragments: list[str], context: dict[str, Any] | None = None) -> GenerationResult:
@@ -126,6 +164,16 @@ class HeuristicReasoningProvider(ReasoningProvider):
         if memory_lines:
             sections.extend(["", "## Relevant Preferences"])
             sections.extend(memory_lines)
+
+        projects = context.get("projects", []) if context else []
+        if projects:
+            sections.extend(["", "## Project Context"])
+            sections.extend(f"- {item['project_name']}: {item['summary']}" for item in projects[:2])
+
+        goals = context.get("goals", []) if context else []
+        if goals:
+            sections.extend(["", "## Active Goals"])
+            sections.extend(f"- {item['title']}: {item.get('next_action') or item.get('detail', '')}" for item in goals[:3])
 
         return GenerationResult(
             text="\n".join(sections).strip(),
@@ -180,6 +228,63 @@ class HeuristicReasoningProvider(ReasoningProvider):
             maybe_add("system.processes", {"limit": 20}, "Inspect active processes.")
             return calls
 
+        if any(token in lowered for token in ("window list", "open windows", "active windows")):
+            maybe_add("system.windows", {"limit": 20}, "Inspect desktop windows.")
+            return calls
+
+        focus_window = re.search(
+            r"(?:focus|activate|switch to|bring to front)\s+(?:the\s+)?window\s+(.+)",
+            normalized,
+            re.IGNORECASE,
+        )
+        if focus_window:
+            maybe_add("system.window_focus", {"title": focus_window.group(1).strip()}, "Focus the requested window.")
+            return calls
+
+        minimize_window = re.search(
+            r"(?:minimi[sz]e|hide)\s+(?:the\s+)?window\s+(.+)",
+            normalized,
+            re.IGNORECASE,
+        )
+        if minimize_window:
+            maybe_add("system.window_minimize", {"title": minimize_window.group(1).strip()}, "Minimize the requested window.")
+            return calls
+
+        maximize_window = re.search(
+            r"(?:maximi[sz]e|fullscreen)\s+(?:the\s+)?window\s+(.+)",
+            normalized,
+            re.IGNORECASE,
+        )
+        if maximize_window:
+            maybe_add("system.window_maximize", {"title": maximize_window.group(1).strip()}, "Maximize the requested window.")
+            return calls
+
+        terminate_process_pid = re.search(
+            r"(?:kill|stop|terminate|end|close)\s+(?:the\s+)?(?:process|pid|app(?:lication)?)\s+(\d+)",
+            normalized,
+            re.IGNORECASE,
+        )
+        if terminate_process_pid:
+            maybe_add(
+                "system.terminate_process",
+                {"pid": int(terminate_process_pid.group(1))},
+                "Terminate the requested process by pid.",
+            )
+            return calls
+
+        terminate_process_name = re.search(
+            r"(?:kill|stop|terminate|end|close)\s+(?:the\s+)?(?:process|app(?:lication)?)\s+(.+)",
+            normalized,
+            re.IGNORECASE,
+        )
+        if terminate_process_name:
+            maybe_add(
+                "system.terminate_process",
+                {"process_name": terminate_process_name.group(1).strip()},
+                "Terminate the requested process by exact name.",
+            )
+            return calls
+
         if any(token in lowered for token in ("startup status", "autostart status", "start on boot", "start on login")):
             maybe_add("system.startup_status", {}, "Check whether JARVIS is configured to start automatically.")
             return calls
@@ -192,6 +297,24 @@ class HeuristicReasoningProvider(ReasoningProvider):
         recall_match = re.search(r"(?:recall|remembered|what do you know about|what did i say about)\s+(.+)", normalized, re.IGNORECASE)
         if recall_match:
             maybe_add("memory.recall", {"query": recall_match.group(1).strip(), "limit": 5}, "Search long-term memory.")
+            return calls
+
+        if any(token in lowered for token in ("what should i do next", "what next", "next steps", "any suggestions", "what do you suggest")):
+            maybe_add("memory.suggestions", {"limit": 5}, "Review proactive suggestions.")
+            return calls
+
+        if any(token in lowered for token in ("what should i focus on", "top priorities", "active goals", "show goals", "list goals", "what are my goals")):
+            maybe_add("memory.goals", {"status": "active", "limit": 5}, "Review active goals and next actions.")
+            return calls
+
+        if any(token in lowered for token in ("project context", "current project", "what are we working on", "project summary")):
+            maybe_add("memory.projects", {"limit": 5}, "Review active project context.")
+            return calls
+
+        goal_create_match = re.search(r"(?:track|create|add|start)\s+(?:a\s+)?goal(?:\s+to)?\s+(.+)", normalized, re.IGNORECASE)
+        if goal_create_match:
+            title = goal_create_match.group(1).strip()
+            maybe_add("memory.goal_create", {"title": title, "detail": title, "priority": 70}, "Track a new persistent goal.")
             return calls
 
         remember_match = re.search(r"remember(?:\s+that)?\s+(.+)", normalized, re.IGNORECASE)
@@ -286,28 +409,12 @@ class OllamaReasoningProvider(ReasoningProvider):
         tool_lines = "\n".join(f"- {tool['name']}: {tool['description']}" for tool in tools)
         planning_prompt = (
             "Return only JSON with the shape {\"tool_calls\":[{\"name\":\"tool.name\",\"arguments\":{},\"reason\":\"...\"}]}. "
-            f"Use at most {max_calls} calls.\n\n"
+            f"If no tool is needed, return {{\"tool_calls\":[]}}. Use at most {max_calls} calls.\n\n"
             f"Available tools:\n{tool_lines}\n\n"
             f"User request: {prompt}"
         )
         result = await self.respond(planning_prompt, context=context)
-        match = re.search(r"\{.*\}", result.text, re.DOTALL)
-        if not match:
-            return []
-        try:
-            payload = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return []
-        calls: list[ToolCall] = []
-        for item in payload.get("tool_calls", [])[:max_calls]:
-            name = item.get("name")
-            if not isinstance(name, str):
-                continue
-            arguments = item.get("arguments", {})
-            if not isinstance(arguments, dict):
-                arguments = {}
-            calls.append(ToolCall(name=name, arguments=arguments, reason=str(item.get("reason", ""))))
-        return calls
+        return _extract_tool_calls_from_text(result.text, max_calls)
 
     def _build_prompt(self, prompt: str, context: dict[str, Any]) -> str:
         sections = [
@@ -318,6 +425,14 @@ class OllamaReasoningProvider(ReasoningProvider):
         if memories:
             sections.append("Relevant memory:")
             sections.extend(f"- {item['content']}" for item in memories[:5])
+        projects = context.get("projects") or []
+        if projects:
+            sections.append("Active project context:")
+            sections.extend(f"- {item['project_name']}: {item['summary']}" for item in projects[:3])
+        goals = context.get("goals") or []
+        if goals:
+            sections.append("Active goals:")
+            sections.extend(f"- {item['title']}: {item.get('next_action') or item.get('detail', '')}" for item in goals[:3])
         return "\n\n".join(section for section in sections if section)
 
     def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -335,14 +450,172 @@ class OllamaReasoningProvider(ReasoningProvider):
             raise RuntimeError(f"Ollama request failed: {exc}") from exc
 
 
+class GeminiReasoningProvider(ReasoningProvider):
+    name = "gemini"
+
+    def __init__(self, model: str, endpoint: str, api_key: str, timeout_seconds: int = 20) -> None:
+        self.model = model
+        self.endpoint = endpoint
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+
+    async def respond(self, prompt: str, context: dict[str, Any] | None = None) -> GenerationResult:
+        if not self.api_key:
+            raise RuntimeError("Gemini API key is not configured.")
+        payload = self._build_payload(prompt, context or {})
+        data = await asyncio.to_thread(self._post_json, payload)
+        text = self._extract_text(data)
+        return GenerationResult(
+            text=text,
+            provider=self.name,
+            model=self.model,
+            metadata={
+                "candidates": len(data.get("candidates", [])),
+                "finish_reason": self._extract_finish_reason(data),
+            },
+        )
+
+    async def summarize(self, goal: str, fragments: list[str], context: dict[str, Any] | None = None) -> GenerationResult:
+        summary_prompt = (
+            f"Write a concise structured report for the goal: {goal}\n\n"
+            "Source material:\n"
+            + "\n".join(f"- {fragment}" for fragment in fragments)
+        )
+        return await self.respond(summary_prompt, context=context)
+
+    async def plan_tool_usage(
+        self,
+        prompt: str,
+        tools: list[dict[str, Any]],
+        context: dict[str, Any] | None = None,
+        max_calls: int = 3,
+    ) -> list[ToolCall]:
+        tool_lines = "\n".join(f"- {tool['name']}: {tool['description']}" for tool in tools)
+        planning_prompt = (
+            "Return only JSON with the shape {\"tool_calls\":[{\"name\":\"tool.name\",\"arguments\":{},\"reason\":\"...\"}]}. "
+            f"If no tool is needed, return {{\"tool_calls\":[]}}. Use at most {max_calls} calls.\n\n"
+            f"Available tools:\n{tool_lines}\n\n"
+            f"User request: {prompt}"
+        )
+        result = await self.respond(planning_prompt, context=context)
+        return _extract_tool_calls_from_text(result.text, max_calls)
+
+    def _build_payload(self, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "system_instruction": {
+                "parts": [
+                    {
+                        "text": (
+                            "You are JARVIS, a personal AI operating layer. "
+                            "Be concise, practical, and accurate. "
+                            "When asked for JSON, return valid JSON only with no markdown fences."
+                        )
+                    }
+                ]
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": self._build_prompt(prompt, context)}],
+                }
+            ],
+            "generationConfig": {"temperature": 0.2},
+        }
+
+    def _build_prompt(self, prompt: str, context: dict[str, Any]) -> str:
+        sections = [prompt.strip()]
+        memories = context.get("memories") or []
+        if memories:
+            sections.append("Relevant memory:")
+            sections.extend(f"- {item['content']}" for item in memories[:5])
+        projects = context.get("projects") or []
+        if projects:
+            sections.append("Active project context:")
+            sections.extend(f"- {item['project_name']}: {item['summary']}" for item in projects[:3])
+        goals = context.get("goals") or []
+        if goals:
+            sections.append("Active goals:")
+            sections.extend(f"- {item['title']}: {item.get('next_action') or item.get('detail', '')}" for item in goals[:3])
+        results = context.get("results") or []
+        if results:
+            sections.append("Latest findings:")
+            sections.extend(f"- {item}" for item in results[:5])
+        plan = context.get("plan")
+        if isinstance(plan, dict) and plan.get("steps"):
+            sections.append("Current plan:")
+            sections.extend(f"- {step['title']}" for step in plan["steps"][:10])
+        return "\n\n".join(section for section in sections if section)
+
+    def _extract_text(self, data: dict[str, Any]) -> str:
+        prompt_feedback = data.get("promptFeedback", {})
+        block_reason = prompt_feedback.get("blockReason")
+        if block_reason:
+            raise RuntimeError(f"Gemini blocked the request: {block_reason}")
+
+        text_parts: list[str] = []
+        for candidate in data.get("candidates", []):
+            content = candidate.get("content", {})
+            for part in content.get("parts", []):
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    text_parts.append(text.strip())
+            if text_parts:
+                break
+        return "\n".join(text_parts).strip()
+
+    def _extract_finish_reason(self, data: dict[str, Any]) -> str | None:
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return None
+        reason = candidates[0].get("finishReason")
+        return str(reason) if reason is not None else None
+
+    def _resolve_endpoint(self) -> str:
+        if "{model}" in self.endpoint:
+            return self.endpoint.format(model=self.model)
+        return self.endpoint
+
+    def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
+        body = json.dumps(payload).encode("utf-8")
+        request = urllib_request.Request(
+            self._resolve_endpoint(),
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key,
+                "x-goog-api-client": "jarvis/0.4.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=self.timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib_error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Gemini request failed: {exc.code} {detail}") from exc
+        except urllib_error.URLError as exc:
+            raise RuntimeError(f"Gemini request failed: {exc}") from exc
+
+
 class IntelligenceService(Service):
-    def __init__(self, settings: IntelligenceSettings) -> None:
+    def __init__(self, settings: IntelligenceSettings, gemini_api_key: str = "") -> None:
         super().__init__("jarvis.intelligence")
         self.settings = settings
+        self.gemini_api_key = gemini_api_key
         self.heuristic = HeuristicReasoningProvider()
         self.provider = self._build_provider(settings)
 
     def _build_provider(self, settings: IntelligenceSettings) -> ReasoningProvider:
+        if settings.provider.lower() == "gemini":
+            if not self.gemini_api_key:
+                self.logger.warning("Gemini provider selected but JARVIS_GEMINI_API_KEY is not set. Falling back to heuristic.")
+                return self.heuristic
+            return GeminiReasoningProvider(
+                model=settings.model,
+                endpoint=settings.endpoint,
+                api_key=self.gemini_api_key,
+                timeout_seconds=settings.timeout_seconds,
+            )
         if settings.provider.lower() == "ollama":
             return OllamaReasoningProvider(
                 model=settings.model,
@@ -350,6 +623,15 @@ class IntelligenceService(Service):
                 timeout_seconds=settings.timeout_seconds,
             )
         return self.heuristic
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "configured_provider": self.settings.provider.lower(),
+            "active_provider": self.provider.name,
+            "model": self.provider.model,
+            "endpoint": self.settings.endpoint,
+            "has_gemini_api_key": bool(self.gemini_api_key),
+        }
 
     async def respond(self, prompt: str, context: dict[str, Any] | None = None) -> GenerationResult:
         try:

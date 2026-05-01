@@ -9,7 +9,9 @@ from .events import AsyncEventBus
 if TYPE_CHECKING:
     from jarvis.brain.intelligence import IntelligenceService
     from jarvis.brain.learning import AdaptiveLearningService
+    from jarvis.brain.proactive import ProactiveReviewService
     from jarvis.automation.scheduler import AutomationService
+    from jarvis.automation.orchestration import OrchestrationService
     from jarvis.memory.service import MemoryService
     from jarvis.plugins.loader import PluginLoader
     from jarvis.security.confirmations import ConfirmationService
@@ -36,6 +38,8 @@ class JarvisContext:
     plugins: "PluginLoader"
     intelligence: "IntelligenceService | None" = None
     learning: "AdaptiveLearningService | None" = None
+    proactive: "ProactiveReviewService | None" = None
+    orchestration: "OrchestrationService | None" = None
     confirmations: "ConfirmationService | None" = None
     runtime: "JarvisRuntime | None" = None
     voice: "VoicePipeline | None" = None

@@ -132,6 +132,104 @@ class SQLiteMemoryStore:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS project_contexts (
+                    project_id TEXT PRIMARY KEY,
+                    project_name TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proactive_suggestions (
+                    suggestion_id TEXT PRIMARY KEY,
+                    category TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    priority INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS goals (
+                    goal_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    title_key TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    priority INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    project_id TEXT NULL,
+                    next_action TEXT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    completed_at TEXT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workflows (
+                    workflow_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    title_key TEXT NOT NULL,
+                    goal_id TEXT NULL,
+                    status TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workflow_steps (
+                    step_id TEXT PRIMARY KEY,
+                    workflow_id TEXT NOT NULL,
+                    step_order INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    command_text TEXT NOT NULL,
+                    depends_on_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    result TEXT NULL,
+                    request_id TEXT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_goals_status_updated
+                ON goals (status, updated_at DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_goals_title_key
+                ON goals (title_key)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_workflows_status_updated
+                ON workflows (status, updated_at DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_workflows_title_key
+                ON workflows (title_key)
+                """
+            )
             connection.commit()
 
     async def save_conversation(self, request: CommandRequest, response: CommandResponse) -> None:
@@ -614,3 +712,483 @@ class SQLiteMemoryStore:
             }
             for row in rows
         ]
+
+    async def save_project_context(self, context: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._save_project_context_sync, context)
+
+    def _save_project_context_sync(self, context: dict[str, Any]) -> None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO project_contexts (
+                    project_id, project_name, summary, status, metadata_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    context["project_id"],
+                    context["project_name"],
+                    context["summary"],
+                    context["status"],
+                    json.dumps(context.get("metadata", {})),
+                    context["updated_at"],
+                ),
+            )
+            connection.commit()
+
+    async def project_context(self, project_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._project_context_sync, project_id)
+
+    def _project_context_sync(self, project_id: str) -> dict[str, Any] | None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            row = connection.execute(
+                """
+                SELECT project_id, project_name, summary, status, metadata_json, updated_at
+                FROM project_contexts
+                WHERE project_id = ?
+                """,
+                (project_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "project_id": row[0],
+            "project_name": row[1],
+            "summary": row[2],
+            "status": row[3],
+            "metadata": json.loads(row[4]),
+            "updated_at": row[5],
+        }
+
+    async def project_contexts(self, status: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._project_contexts_sync, status, limit)
+
+    def _project_contexts_sync(self, status: str | None, limit: int) -> list[dict[str, Any]]:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            if status:
+                rows = connection.execute(
+                    """
+                    SELECT project_id, project_name, summary, status, metadata_json, updated_at
+                    FROM project_contexts
+                    WHERE status = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (status, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT project_id, project_name, summary, status, metadata_json, updated_at
+                    FROM project_contexts
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        return [
+            {
+                "project_id": row[0],
+                "project_name": row[1],
+                "summary": row[2],
+                "status": row[3],
+                "metadata": json.loads(row[4]),
+                "updated_at": row[5],
+            }
+            for row in rows
+        ]
+
+    async def replace_proactive_suggestions(self, suggestions: list[dict[str, Any]]) -> None:
+        await asyncio.to_thread(self._replace_proactive_suggestions_sync, suggestions)
+
+    def _replace_proactive_suggestions_sync(self, suggestions: list[dict[str, Any]]) -> None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute("DELETE FROM proactive_suggestions")
+            connection.executemany(
+                """
+                INSERT INTO proactive_suggestions (
+                    suggestion_id, category, title, detail, priority, status, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        suggestion["suggestion_id"],
+                        suggestion["category"],
+                        suggestion["title"],
+                        suggestion["detail"],
+                        suggestion["priority"],
+                        suggestion["status"],
+                        json.dumps(suggestion.get("metadata", {})),
+                        suggestion["created_at"],
+                        suggestion["updated_at"],
+                    )
+                    for suggestion in suggestions
+                ],
+            )
+            connection.commit()
+
+    async def proactive_suggestions(self, status: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._proactive_suggestions_sync, status, limit)
+
+    def _proactive_suggestions_sync(self, status: str | None, limit: int) -> list[dict[str, Any]]:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            if status:
+                rows = connection.execute(
+                    """
+                    SELECT suggestion_id, category, title, detail, priority, status, metadata_json, created_at, updated_at
+                    FROM proactive_suggestions
+                    WHERE status = ?
+                    ORDER BY priority DESC, updated_at DESC
+                    LIMIT ?
+                    """,
+                    (status, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT suggestion_id, category, title, detail, priority, status, metadata_json, created_at, updated_at
+                    FROM proactive_suggestions
+                    ORDER BY priority DESC, updated_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        return [
+            {
+                "suggestion_id": row[0],
+                "category": row[1],
+                "title": row[2],
+                "detail": row[3],
+                "priority": row[4],
+                "status": row[5],
+                "metadata": json.loads(row[6]),
+                "created_at": row[7],
+                "updated_at": row[8],
+            }
+            for row in rows
+        ]
+
+    async def save_goal(self, goal: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._save_goal_sync, goal)
+
+    def _save_goal_sync(self, goal: dict[str, Any]) -> None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO goals (
+                    goal_id, title, title_key, detail, priority, status, project_id, next_action,
+                    metadata_json, created_at, updated_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    goal["goal_id"],
+                    goal["title"],
+                    self._title_key(goal["title"]),
+                    goal["detail"],
+                    int(goal.get("priority", 50)),
+                    goal["status"],
+                    goal.get("project_id"),
+                    goal.get("next_action"),
+                    json.dumps(goal.get("metadata", {})),
+                    goal["created_at"],
+                    goal["updated_at"],
+                    goal.get("completed_at"),
+                ),
+            )
+            connection.commit()
+
+    async def goal(self, goal_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._goal_sync, goal_id)
+
+    def _goal_sync(self, goal_id: str) -> dict[str, Any] | None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            row = connection.execute(
+                """
+                SELECT goal_id, title, detail, priority, status, project_id, next_action, metadata_json,
+                       created_at, updated_at, completed_at
+                FROM goals
+                WHERE goal_id = ?
+                """,
+                (goal_id,),
+            ).fetchone()
+        return self._goal_row_to_dict(row)
+
+    async def find_goal(self, title: str, statuses: list[str] | None = None) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._find_goal_sync, title, statuses)
+
+    def _find_goal_sync(self, title: str, statuses: list[str] | None) -> dict[str, Any] | None:
+        title_key = self._title_key(title)
+        status_clause, params = self._goal_status_clause(statuses)
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            exact = connection.execute(
+                f"""
+                SELECT goal_id, title, detail, priority, status, project_id, next_action, metadata_json,
+                       created_at, updated_at, completed_at
+                FROM goals
+                WHERE title_key = ? {status_clause}
+                ORDER BY priority DESC, updated_at DESC
+                LIMIT 1
+                """,
+                (title_key, *params),
+            ).fetchone()
+            if exact is not None:
+                return self._goal_row_to_dict(exact)
+            partial = connection.execute(
+                f"""
+                SELECT goal_id, title, detail, priority, status, project_id, next_action, metadata_json,
+                       created_at, updated_at, completed_at
+                FROM goals
+                WHERE (title_key LIKE ? OR ? LIKE '%' || title_key || '%') {status_clause}
+                ORDER BY priority DESC, updated_at DESC
+                LIMIT 1
+                """,
+                (f"%{title_key}%", title_key, *params),
+            ).fetchone()
+        return self._goal_row_to_dict(partial)
+
+    async def goals(self, status: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._goals_sync, status, limit)
+
+    def _goals_sync(self, status: str | None, limit: int) -> list[dict[str, Any]]:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            if status:
+                rows = connection.execute(
+                    """
+                    SELECT goal_id, title, detail, priority, status, project_id, next_action, metadata_json,
+                           created_at, updated_at, completed_at
+                    FROM goals
+                    WHERE status = ?
+                    ORDER BY priority DESC, updated_at DESC
+                    LIMIT ?
+                    """,
+                    (status, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT goal_id, title, detail, priority, status, project_id, next_action, metadata_json,
+                           created_at, updated_at, completed_at
+                    FROM goals
+                    ORDER BY priority DESC, updated_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        return [self._goal_row_to_dict(row) for row in rows if row is not None]
+
+    def _goal_status_clause(self, statuses: list[str] | None) -> tuple[str, list[str]]:
+        if not statuses:
+            return "", []
+        placeholders = ", ".join("?" for _ in statuses)
+        return f" AND status IN ({placeholders})", list(statuses)
+
+    def _goal_row_to_dict(self, row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        return {
+            "goal_id": row[0],
+            "title": row[1],
+            "detail": row[2],
+            "priority": row[3],
+            "status": row[4],
+            "project_id": row[5],
+            "next_action": row[6],
+            "metadata": json.loads(row[7]),
+            "created_at": row[8],
+            "updated_at": row[9],
+            "completed_at": row[10],
+        }
+
+    def _title_key(self, title: str) -> str:
+        return " ".join(title.lower().split())
+
+    async def save_workflow(self, workflow: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._save_workflow_sync, workflow)
+
+    def _save_workflow_sync(self, workflow: dict[str, Any]) -> None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO workflows (
+                    workflow_id, title, title_key, goal_id, status, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    workflow["workflow_id"],
+                    workflow["title"],
+                    self._title_key(workflow["title"]),
+                    workflow.get("goal_id"),
+                    workflow["status"],
+                    json.dumps(workflow.get("metadata", {})),
+                    workflow["created_at"],
+                    workflow["updated_at"],
+                ),
+            )
+            connection.execute("DELETE FROM workflow_steps WHERE workflow_id = ?", (workflow["workflow_id"],))
+            connection.executemany(
+                """
+                INSERT INTO workflow_steps (
+                    step_id, workflow_id, step_order, title, command_text, depends_on_json, status, result, request_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        step["step_id"],
+                        workflow["workflow_id"],
+                        index,
+                        step["title"],
+                        step["command_text"],
+                        json.dumps(step.get("depends_on", [])),
+                        step["status"],
+                        step.get("result"),
+                        step.get("request_id"),
+                    )
+                    for index, step in enumerate(workflow.get("steps", []))
+                ],
+            )
+            connection.commit()
+
+    async def workflow(self, workflow_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._workflow_sync, workflow_id)
+
+    def _workflow_sync(self, workflow_id: str) -> dict[str, Any] | None:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            workflow_row = connection.execute(
+                """
+                SELECT workflow_id, title, goal_id, status, metadata_json, created_at, updated_at
+                FROM workflows
+                WHERE workflow_id = ?
+                """,
+                (workflow_id,),
+            ).fetchone()
+            if workflow_row is None:
+                return None
+            step_rows = connection.execute(
+                """
+                SELECT step_id, title, command_text, depends_on_json, status, result, request_id
+                FROM workflow_steps
+                WHERE workflow_id = ?
+                ORDER BY step_order ASC
+                """,
+                (workflow_id,),
+            ).fetchall()
+        return self._workflow_rows_to_dict(workflow_row, step_rows)
+
+    async def find_workflow(self, title: str, statuses: list[str] | None = None) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._find_workflow_sync, title, statuses)
+
+    def _find_workflow_sync(self, title: str, statuses: list[str] | None) -> dict[str, Any] | None:
+        title_key = self._title_key(title)
+        status_clause, params = self._goal_status_clause(statuses)
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            row = connection.execute(
+                f"""
+                SELECT workflow_id, title, goal_id, status, metadata_json, created_at, updated_at
+                FROM workflows
+                WHERE (title_key = ? OR title_key LIKE ? OR ? LIKE '%' || title_key || '%') {status_clause}
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (title_key, f"%{title_key}%", title_key, *params),
+            ).fetchone()
+            if row is None:
+                return None
+            step_rows = connection.execute(
+                """
+                SELECT step_id, title, command_text, depends_on_json, status, result, request_id
+                FROM workflow_steps
+                WHERE workflow_id = ?
+                ORDER BY step_order ASC
+                """,
+                (row[0],),
+            ).fetchall()
+        return self._workflow_rows_to_dict(row, step_rows)
+
+    async def workflows(self, status: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._workflows_sync, status, limit)
+
+    def _workflows_sync(self, status: str | None, limit: int) -> list[dict[str, Any]]:
+        with closing(sqlite3.connect(self.db_path)) as connection:
+            if status:
+                workflow_rows = connection.execute(
+                    """
+                    SELECT workflow_id, title, goal_id, status, metadata_json, created_at, updated_at
+                    FROM workflows
+                    WHERE status = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (status, limit),
+                ).fetchall()
+            else:
+                workflow_rows = connection.execute(
+                    """
+                    SELECT workflow_id, title, goal_id, status, metadata_json, created_at, updated_at
+                    FROM workflows
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            workflow_ids = [row[0] for row in workflow_rows]
+            step_rows = connection.execute(
+                f"""
+                SELECT step_id, workflow_id, title, command_text, depends_on_json, status, result, request_id, step_order
+                FROM workflow_steps
+                WHERE workflow_id IN ({", ".join("?" for _ in workflow_ids)}) 
+                ORDER BY workflow_id ASC, step_order ASC
+                """ if workflow_ids else "SELECT step_id, workflow_id, title, command_text, depends_on_json, status, result, request_id, step_order FROM workflow_steps WHERE 1 = 0",
+                workflow_ids,
+            ).fetchall() if workflow_ids else []
+
+        steps_by_workflow: dict[str, list[Any]] = {}
+        for row in step_rows:
+            steps_by_workflow.setdefault(row[1], []).append(row)
+        return [
+            self._workflow_rows_to_dict(row, steps_by_workflow.get(row[0], []), workflow_row_has_id=False)
+            for row in workflow_rows
+        ]
+
+    def _workflow_rows_to_dict(
+        self,
+        workflow_row: Any,
+        step_rows: list[Any],
+        workflow_row_has_id: bool = True,
+    ) -> dict[str, Any]:
+        if workflow_row_has_id:
+            workflow_id, title, goal_id, status, metadata_json, created_at, updated_at = workflow_row
+            steps = [
+                {
+                    "step_id": row[0],
+                    "title": row[1],
+                    "command_text": row[2],
+                    "depends_on": json.loads(row[3]),
+                    "status": row[4],
+                    "result": row[5],
+                    "request_id": row[6],
+                }
+                for row in step_rows
+            ]
+        else:
+            workflow_id, title, goal_id, status, metadata_json, created_at, updated_at = workflow_row
+            steps = [
+                {
+                    "step_id": row[0],
+                    "title": row[2],
+                    "command_text": row[3],
+                    "depends_on": json.loads(row[4]),
+                    "status": row[5],
+                    "result": row[6],
+                    "request_id": row[7],
+                }
+                for row in step_rows
+            ]
+        return {
+            "workflow_id": workflow_id,
+            "title": title,
+            "goal_id": goal_id,
+            "status": status,
+            "metadata": json.loads(metadata_json),
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "steps": steps,
+        }

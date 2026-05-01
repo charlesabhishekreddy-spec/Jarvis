@@ -1,8 +1,19 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from jarvis.core.models import ActivityRecord, CommandRequest, CommandResponse, TaskPlan, utc_now
+from jarvis.core.models import (
+    ActivityRecord,
+    CommandRequest,
+    CommandResponse,
+    GoalRecord,
+    GoalStatus,
+    TaskPlan,
+    WorkflowRecord,
+    WorkflowStepRecord,
+    utc_now,
+)
 from jarvis.core.service import Service
 
 from .knowledge_graph import KnowledgeGraphExtractor
@@ -119,6 +130,100 @@ class MemoryService(Service):
 
     async def confirmations(self, status: str | None = None, limit: int = 100) -> list[dict]:
         return await self.sqlite.confirmations(status=status, limit=limit)
+
+    async def save_project_context(self, context: dict) -> None:
+        await self.sqlite.save_project_context(context)
+
+    async def project_context(self, project_id: str) -> dict | None:
+        return await self.sqlite.project_context(project_id)
+
+    async def project_contexts(self, status: str | None = None, limit: int = 25) -> list[dict]:
+        return await self.sqlite.project_contexts(status=status, limit=limit)
+
+    async def replace_proactive_suggestions(self, suggestions: list[dict]) -> None:
+        await self.sqlite.replace_proactive_suggestions(suggestions)
+
+    async def proactive_suggestions(self, status: str | None = None, limit: int = 25) -> list[dict]:
+        return await self.sqlite.proactive_suggestions(status=status, limit=limit)
+
+    async def create_goal(
+        self,
+        title: str,
+        detail: str = "",
+        priority: int = 50,
+        project_id: str | None = None,
+        next_action: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> GoalRecord:
+        goal = GoalRecord(
+            title=title,
+            detail=detail or title,
+            priority=max(1, min(int(priority), 100)),
+            project_id=project_id,
+            next_action=next_action,
+            metadata=metadata or {},
+        )
+        await self.sqlite.save_goal(goal.to_dict())
+        return goal
+
+    async def save_goal(self, goal: dict[str, Any]) -> None:
+        await self.sqlite.save_goal(goal)
+
+    async def goal(self, goal_id: str) -> dict[str, Any] | None:
+        return await self.sqlite.goal(goal_id)
+
+    async def find_goal(self, title: str, statuses: list[str] | None = None) -> dict[str, Any] | None:
+        return await self.sqlite.find_goal(title, statuses=statuses)
+
+    async def goals(self, status: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
+        return await self.sqlite.goals(status=status, limit=limit)
+
+    async def update_goal(self, goal_id: str, **updates: Any) -> dict[str, Any] | None:
+        goal = await self.goal(goal_id)
+        if goal is None:
+            return None
+        goal.update({key: value for key, value in updates.items() if value is not None})
+        goal["priority"] = max(1, min(int(goal.get("priority", 50)), 100))
+        goal["updated_at"] = utc_now().isoformat()
+        if goal.get("status") == GoalStatus.COMPLETED.value and not goal.get("completed_at"):
+            goal["completed_at"] = goal["updated_at"]
+        if goal.get("status") != GoalStatus.COMPLETED.value:
+            goal["completed_at"] = None
+        await self.sqlite.save_goal(goal)
+        return goal
+
+    async def create_workflow(
+        self,
+        title: str,
+        commands: list[str],
+        goal_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> WorkflowRecord:
+        steps: list[WorkflowStepRecord] = []
+        previous_step_id: str | None = None
+        for index, command in enumerate(commands, start=1):
+            step = WorkflowStepRecord(
+                title=f"Step {index}",
+                command_text=command,
+                depends_on=[previous_step_id] if previous_step_id else [],
+            )
+            steps.append(step)
+            previous_step_id = step.step_id
+        workflow = WorkflowRecord(title=title, steps=steps, goal_id=goal_id, metadata=metadata or {})
+        await self.sqlite.save_workflow(workflow.to_dict())
+        return workflow
+
+    async def save_workflow(self, workflow: dict[str, Any]) -> None:
+        await self.sqlite.save_workflow(workflow)
+
+    async def workflow(self, workflow_id: str) -> dict[str, Any] | None:
+        return await self.sqlite.workflow(workflow_id)
+
+    async def workflows(self, status: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
+        return await self.sqlite.workflows(status=status, limit=limit)
+
+    async def find_workflow(self, title: str, statuses: list[str] | None = None) -> dict[str, Any] | None:
+        return await self.sqlite.find_workflow(title, statuses=statuses)
 
     def _node_key(self, node_type: str, value: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.lower()).strip("_")

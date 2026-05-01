@@ -33,6 +33,13 @@ class VoiceSettings:
     language: str = "en"
     use_porcupine: bool = False
     streaming: bool = False
+    auto_start: bool = False
+    sample_rate: int = 16000
+    frame_duration_ms: int = 30
+    speech_silence_frames: int = 12
+    max_command_seconds: int = 12
+    stt_model: str = "base"
+    tts_model: str = "tts_models/en/ljspeech/tacotron2-DDC"
 
 
 @dataclass(slots=True)
@@ -51,6 +58,7 @@ class SecuritySettings:
 
 @dataclass(slots=True)
 class APIKeys:
+    gemini_api_key: str = ""
     news_api_key: str = ""
     weather_api_key: str = ""
     elevenlabs_api_key: str = ""
@@ -75,6 +83,8 @@ class LearningSettings:
     enabled: bool = True
     auto_extract_preferences: bool = True
     max_patterns: int = 500
+    proactive_review_enabled: bool = True
+    proactive_review_interval_seconds: int = 300
 
 
 @dataclass(slots=True)
@@ -145,6 +155,7 @@ def load_settings(path: str | None = None) -> Settings:
     data["security"]["allow_shell"] = os.getenv("JARVIS_ALLOW_SHELL", str(data["security"]["allow_shell"])).lower() == "true"
     data["api_keys"]["news_api_key"] = os.getenv("JARVIS_NEWS_API_KEY", data["api_keys"]["news_api_key"])
     data["api_keys"]["weather_api_key"] = os.getenv("JARVIS_WEATHER_API_KEY", data["api_keys"]["weather_api_key"])
+    data["api_keys"]["gemini_api_key"] = os.getenv("JARVIS_GEMINI_API_KEY", data["api_keys"]["gemini_api_key"])
     data["api_keys"]["elevenlabs_api_key"] = os.getenv(
         "JARVIS_ELEVENLABS_API_KEY", data["api_keys"]["elevenlabs_api_key"]
     )
@@ -154,6 +165,15 @@ def load_settings(path: str | None = None) -> Settings:
     data["startup"]["task_name"] = os.getenv("JARVIS_STARTUP_TASK_NAME", data["startup"]["task_name"])
     data["startup"]["default_mode"] = os.getenv("JARVIS_STARTUP_MODE", data["startup"]["default_mode"])
     data["learning"]["enabled"] = os.getenv("JARVIS_LEARNING_ENABLED", str(data["learning"]["enabled"])).lower() == "true"
+    data["learning"]["proactive_review_enabled"] = (
+        os.getenv("JARVIS_PROACTIVE_REVIEW_ENABLED", str(data["learning"]["proactive_review_enabled"])).lower() == "true"
+    )
+    data["learning"]["proactive_review_interval_seconds"] = int(
+        os.getenv(
+            "JARVIS_PROACTIVE_REVIEW_INTERVAL_SECONDS",
+            data["learning"]["proactive_review_interval_seconds"],
+        )
+    )
     settings = _as_settings(data)
     root = package_root.parent
     settings.runtime.data_dir = resolve_data_path(settings.runtime.data_dir, root)

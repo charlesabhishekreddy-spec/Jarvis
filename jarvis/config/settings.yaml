@@ -11,6 +11,13 @@ voice:
   language: en
   use_porcupine: false
   streaming: false
+  auto_start: false
+  sample_rate: 16000
+  frame_duration_ms: 30
+  speech_silence_frames: 12
+  max_command_seconds: 12
+  stt_model: base
+  tts_model: tts_models/en/ljspeech/tacotron2-DDC
 
 memory:
   sqlite_path: .jarvis_runtime/jarvis.db
@@ -24,14 +31,15 @@ security:
     - ./
 
 api_keys:
+  gemini_api_key: ""
   news_api_key: ""
   weather_api_key: ""
   elevenlabs_api_key: ""
 
 intelligence:
-  provider: heuristic
-  model: local-heuristic
-  endpoint: http://127.0.0.1:11434/api/generate
+  provider: gemini
+  model: gemini-2.5-flash
+  endpoint: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
   timeout_seconds: 20
 
 startup:
@@ -42,6 +50,8 @@ learning:
   enabled: true
   auto_extract_preferences: true
   max_patterns: 500
+  proactive_review_enabled: true
+  proactive_review_interval_seconds: 300
 
 ui:
   dashboard_poll_seconds: 3

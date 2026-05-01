@@ -42,6 +42,13 @@ class ConfirmationStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class GoalStatus(str, Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
+
+
 @dataclass(slots=True)
 class Event:
     topic: str
@@ -82,6 +89,7 @@ class TaskStep:
     description: str
     agent_hint: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    depends_on: list[str] = field(default_factory=list)
     status: TaskStatus = TaskStatus.PENDING
     result: str | None = None
     step_id: str = field(default_factory=lambda: str(uuid4()))
@@ -91,6 +99,7 @@ class TaskStep:
 class TaskPlan:
     goal: str
     steps: list[TaskStep]
+    metadata: dict[str, Any] = field(default_factory=dict)
     status: TaskStatus = TaskStatus.PENDING
     plan_id: str = field(default_factory=lambda: str(uuid4()))
     created_at: datetime = field(default_factory=utc_now)
@@ -103,6 +112,7 @@ class TaskPlan:
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "metadata": self.metadata,
             "steps": [
                 {
                     "step_id": step.step_id,
@@ -110,6 +120,7 @@ class TaskPlan:
                     "description": step.description,
                     "agent_hint": step.agent_hint,
                     "metadata": step.metadata,
+                    "depends_on": step.depends_on,
                     "status": step.status.value,
                     "result": step.result,
                 }
@@ -187,4 +198,80 @@ class ConfirmationRecord:
             "created_at": self.created_at.isoformat(),
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
             "decision_note": self.decision_note,
+        }
+
+
+@dataclass(slots=True)
+class GoalRecord:
+    title: str
+    detail: str
+    priority: int = 50
+    status: GoalStatus = GoalStatus.ACTIVE
+    project_id: str | None = None
+    next_action: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    goal_id: str = field(default_factory=lambda: str(uuid4()))
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    completed_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "goal_id": self.goal_id,
+            "title": self.title,
+            "detail": self.detail,
+            "priority": self.priority,
+            "status": self.status.value,
+            "project_id": self.project_id,
+            "next_action": self.next_action,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+@dataclass(slots=True)
+class WorkflowStepRecord:
+    title: str
+    command_text: str
+    depends_on: list[str] = field(default_factory=list)
+    status: TaskStatus = TaskStatus.PENDING
+    result: str | None = None
+    request_id: str | None = None
+    step_id: str = field(default_factory=lambda: str(uuid4()))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "title": self.title,
+            "command_text": self.command_text,
+            "depends_on": self.depends_on,
+            "status": self.status.value,
+            "result": self.result,
+            "request_id": self.request_id,
+        }
+
+
+@dataclass(slots=True)
+class WorkflowRecord:
+    title: str
+    steps: list[WorkflowStepRecord]
+    goal_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    status: TaskStatus = TaskStatus.PENDING
+    workflow_id: str = field(default_factory=lambda: str(uuid4()))
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "workflow_id": self.workflow_id,
+            "title": self.title,
+            "goal_id": self.goal_id,
+            "metadata": self.metadata,
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "steps": [step.to_dict() for step in self.steps],
         }

@@ -22,6 +22,8 @@ class CommanderAgent(BaseAgent):
     ) -> dict[str, Any]:
         completed_results = [candidate.result for candidate in plan.steps if candidate.result]
         memories = await context.memory.recall(request.text, limit=3)
+        projects = await context.memory.project_contexts(limit=3)
+        goals = await context.memory.goals(status="active", limit=3)
         if step.metadata.get("include_tools"):
             tools = [f"- {tool['name']}: {tool['description']}" for tool in context.tools.list_tools()]
             return {"message": "Available tools:\n" + "\n".join(tools)}
@@ -29,11 +31,37 @@ class CommanderAgent(BaseAgent):
             summary = await context.intelligence.summarize(
                 goal=request.text,
                 fragments=completed_results,
-                context={"memories": memories, "plan": plan.to_dict(), "results": completed_results},
+                context={
+                    "memories": memories,
+                    "projects": projects,
+                    "goals": goals,
+                    "plan": plan.to_dict(),
+                    "results": completed_results,
+                },
             )
             return {"message": summary.text, "provider": summary.provider}
+        if step.metadata.get("validate_deliverable"):
+            latest = completed_results[-1] if completed_results else "No deliverable details available."
+            response = await context.intelligence.respond(
+                prompt=f"Summarize the completed deliverable for: {request.text}",
+                context={
+                    "memories": memories,
+                    "projects": projects,
+                    "goals": goals,
+                    "plan": plan.to_dict(),
+                    "results": completed_results,
+                },
+            )
+            message = response.text.strip() or latest
+            return {"message": message, "provider": response.provider}
         response = await context.intelligence.respond(
             prompt=request.text,
-            context={"memories": memories, "plan": plan.to_dict(), "results": completed_results},
+            context={
+                "memories": memories,
+                "projects": projects,
+                "goals": goals,
+                "plan": plan.to_dict(),
+                "results": completed_results,
+            },
         )
         return {"message": response.text, "provider": response.provider}

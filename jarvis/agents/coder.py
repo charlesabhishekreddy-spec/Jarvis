@@ -20,16 +20,24 @@ class CoderAgent(BaseAgent):
         request: CommandRequest,
         context: JarvisContext,
     ) -> dict[str, Any]:
+        projects = await context.memory.project_contexts(limit=3)
+        goals = await context.memory.goals(status="active", limit=3)
         if step.metadata.get("shell_command"):
             result = await context.tools.execute(
                 "system.shell",
                 context,
+                confirmed=bool(request.metadata.get("confirmed", False)),
                 command=step.metadata["shell_command"],
                 workdir=step.metadata.get("workdir"),
             )
             return {"message": f"Executed development command with status {result['result']['returncode']}.", "result": result}
         response = await context.intelligence.respond(
             prompt=f"Provide a coding-oriented plan for: {request.text}",
-            context={"plan": plan.to_dict(), "results": [candidate.result for candidate in plan.steps if candidate.result]},
+            context={
+                "projects": projects,
+                "goals": goals,
+                "plan": plan.to_dict(),
+                "results": [candidate.result for candidate in plan.steps if candidate.result],
+            },
         )
         return {"message": response.text, "provider": response.provider}

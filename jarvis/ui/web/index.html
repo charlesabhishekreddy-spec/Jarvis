@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">Persistent AI Operating Layer</p>
         <h1>JARVIS Control Surface</h1>
-        <p class="subtitle">Realtime runtime state, memory, jobs, and command execution in one browser console.</p>
+        <p class="subtitle">Realtime runtime state, goals, memory, jobs, and command execution in one browser console.</p>
       </div>
       <div class="hero-meta">
         <div class="metric-card">
@@ -47,10 +47,29 @@
             <button type="button" class="ghost" id="queue-command">Queue</button>
             <button type="button" class="ghost" data-command="What can you do">Capabilities</button>
             <button type="button" class="ghost" data-command="Show system status">Status</button>
+            <button type="button" class="ghost" data-command="What should I focus on">Focus</button>
+            <button type="button" class="ghost" data-command="List workflows">Workflows</button>
             <button type="button" class="ghost" data-command="Prepare a report about renewable energy">Report</button>
           </div>
         </form>
         <pre id="command-output" class="terminal-output">Awaiting command.</pre>
+      </section>
+
+      <section class="panel live-panel">
+        <div class="panel-header">
+          <h2>Intelligence Console</h2>
+          <span id="intelligence-status" class="badge neutral">Idle</span>
+        </div>
+        <form id="intelligence-form" class="command-form">
+          <textarea id="intelligence-prompt" placeholder="Send a direct Gemini prompt through JARVIS." rows="4"></textarea>
+          <textarea id="intelligence-context" placeholder='Optional JSON context, for example: {"memories":[{"content":"Prefer concise answers."}]}' rows="3">{}</textarea>
+          <div class="command-actions">
+            <button type="submit">Run Prompt</button>
+            <button type="button" class="ghost" data-intelligence-prompt="Summarize the current assistant state in one sentence.">Runtime Summary</button>
+            <button type="button" class="ghost" data-intelligence-prompt="Return valid JSON with the shape {&quot;tool_calls&quot;:[]} and no markdown.">JSON Probe</button>
+          </div>
+        </form>
+        <pre id="intelligence-output" class="terminal-output">Awaiting prompt.</pre>
       </section>
 
       <section class="panel live-panel">
@@ -70,9 +89,59 @@
 
       <section class="panel">
         <div class="panel-header">
+          <h2>Intelligence</h2>
+        </div>
+        <div id="intelligence-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Voice</h2>
+          <span id="voice-state" class="badge neutral">Idle</span>
+        </div>
+        <div class="command-form">
+          <textarea id="voice-input" placeholder="Simulate heard speech, for example: Hey Jarvis what are we working on" rows="3"></textarea>
+          <div class="command-actions">
+            <button type="button" id="voice-start">Start Listening</button>
+            <button type="button" class="ghost" id="voice-stop">Stop</button>
+            <button type="button" class="ghost" id="voice-simulate">Simulate</button>
+          </div>
+        </div>
+        <div id="voice-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Vision</h2>
+          <span id="vision-state" class="badge neutral">Idle</span>
+        </div>
+        <div class="command-actions">
+          <button type="button" id="vision-screen">Capture Screen</button>
+          <button type="button" class="ghost" id="vision-camera">Capture Camera</button>
+        </div>
+        <pre id="vision-output" class="terminal-output">Awaiting capture.</pre>
+        <div id="vision-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
           <h2>Startup</h2>
         </div>
         <div id="startup-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel wide">
+        <div class="panel-header">
+          <h2>Processes</h2>
+        </div>
+        <div id="processes-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel wide">
+        <div class="panel-header">
+          <h2>Windows</h2>
+        </div>
+        <div id="windows-list" class="stack-list"></div>
       </section>
 
       <section class="panel">
@@ -80,6 +149,21 @@
           <h2>Automation Jobs</h2>
         </div>
         <div id="jobs-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Goals</h2>
+          <button type="button" class="ghost inline-action" id="review-goals">Review</button>
+        </div>
+        <div id="goals-list" class="stack-list"></div>
+      </section>
+
+      <section class="panel wide">
+        <div class="panel-header">
+          <h2>Workflows</h2>
+        </div>
+        <div id="workflows-list" class="stack-list"></div>
       </section>
 
       <section class="panel">
@@ -105,7 +189,7 @@
 
       <section class="panel">
         <div class="panel-header">
-          <h2>Memory Insights</h2>
+          <h2>Guidance & Memory</h2>
         </div>
         <div id="insights-list" class="stack-list"></div>
       </section>

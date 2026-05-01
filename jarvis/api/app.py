@@ -29,6 +29,53 @@ class DecisionPayload(BaseModel):
     note: str | None = None
 
 
+class IntelligencePromptPayload(BaseModel):
+    prompt: str = Field(..., min_length=1)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class VoiceSimulatePayload(BaseModel):
+    text: str = Field(..., min_length=1)
+    confirmed: bool = False
+    strict_wake: bool = True
+
+
+class VisionCapturePayload(BaseModel):
+    save_artifact: bool = True
+    include_ocr: bool = True
+    label: str | None = None
+
+
+class ProcessTerminatePayload(BaseModel):
+    pid: int | None = Field(default=None, ge=1)
+    name: str | None = None
+    confirmed: bool = False
+
+
+class WindowActionPayload(BaseModel):
+    title: str = Field(..., min_length=1)
+
+
+class GoalPayload(BaseModel):
+    title: str = Field(..., min_length=1)
+    detail: str = ""
+    priority: int = Field(default=60, ge=1, le=100)
+    next_action: str | None = None
+    project_id: str | None = None
+
+
+class GoalStatusPayload(BaseModel):
+    status: Literal["active", "paused", "blocked", "completed"]
+    priority: int | None = Field(default=None, ge=1, le=100)
+    next_action: str | None = None
+
+
+class WorkflowPayload(BaseModel):
+    title: str = Field(..., min_length=1)
+    steps: list[str] = Field(..., min_length=1)
+    goal_id: str | None = None
+
+
 class StartupInstallPayload(BaseModel):
     mode: Literal["api", "background"] = "api"
     config_path: str | None = None
@@ -73,6 +120,20 @@ def create_app(settings_path: str | None = None) -> FastAPI:
     @app.get("/status")
     async def status() -> dict[str, Any]:
         return await runtime.dashboard_snapshot()
+
+    @app.get("/intelligence")
+    async def intelligence_status() -> dict[str, Any]:
+        return runtime.intelligence.snapshot()
+
+    @app.post("/intelligence/respond")
+    async def intelligence_respond(payload: IntelligencePromptPayload) -> dict[str, Any]:
+        result = await runtime.intelligence.respond(payload.prompt, context=payload.context)
+        return {
+            "text": result.text,
+            "provider": result.provider,
+            "model": result.model,
+            "metadata": result.metadata,
+        }
 
     @app.get("/startup")
     async def startup_status() -> dict[str, Any]:
@@ -150,6 +211,95 @@ def create_app(settings_path: str | None = None) -> FastAPI:
             "data": response.data,
         }
 
+    @app.get("/voice")
+    async def voice_status() -> dict[str, Any]:
+        return runtime.voice.status_snapshot()
+
+    @app.post("/voice/start")
+    async def voice_start() -> dict[str, Any]:
+        return await runtime.voice.start_listening()
+
+    @app.post("/voice/stop")
+    async def voice_stop() -> dict[str, Any]:
+        return await runtime.voice.stop_listening()
+
+    @app.post("/voice/simulate")
+    async def voice_simulate(payload: VoiceSimulatePayload) -> dict[str, Any]:
+        response = await runtime.voice.simulate_heard_text(
+            payload.text,
+            confirmed=payload.confirmed,
+            strict_wake=payload.strict_wake,
+        )
+        return {
+            "status": response.status.value,
+            "message": response.message,
+            "task_id": response.task_id,
+            "data": response.data,
+        }
+
+    @app.get("/vision")
+    async def vision_status() -> dict[str, Any]:
+        return runtime.vision.status_snapshot()
+
+    @app.post("/vision/screen")
+    async def vision_screen(payload: VisionCapturePayload) -> dict[str, Any]:
+        return await runtime.vision.inspect_screen(
+            save_artifact=payload.save_artifact,
+            include_ocr=payload.include_ocr,
+            label=payload.label,
+        )
+
+    @app.post("/vision/camera")
+    async def vision_camera(payload: VisionCapturePayload) -> dict[str, Any]:
+        return await runtime.vision.inspect_camera(
+            save_artifact=payload.save_artifact,
+            include_ocr=payload.include_ocr,
+            label=payload.label,
+        )
+
+    @app.get("/processes")
+    async def processes(
+        limit: int = Query(default=20, ge=1, le=200),
+        q: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        return await runtime.system_controller.list_processes(limit=limit, query=q)
+
+    @app.post("/processes/terminate")
+    async def terminate_process(payload: ProcessTerminatePayload) -> dict[str, Any]:
+        if payload.pid is None and not (payload.name or "").strip():
+            raise HTTPException(status_code=400, detail="Provide pid or name.")
+        target = str(payload.pid) if payload.pid is not None else str(payload.name).strip()
+        response = await runtime.execute_text(
+            f"Jarvis stop process {target}",
+            source="api-process",
+            confirmed=payload.confirmed,
+        )
+        return {
+            "status": response.status.value,
+            "message": response.message,
+            "task_id": response.task_id,
+            "data": response.data,
+        }
+
+    @app.get("/windows")
+    async def windows(
+        limit: int = Query(default=20, ge=1, le=200),
+        q: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        return await runtime.system_controller.list_windows(limit=limit, query=q)
+
+    @app.post("/windows/focus")
+    async def window_focus(payload: WindowActionPayload) -> dict[str, Any]:
+        return await runtime.system_controller.focus_window(payload.title)
+
+    @app.post("/windows/minimize")
+    async def window_minimize(payload: WindowActionPayload) -> dict[str, Any]:
+        return await runtime.system_controller.minimize_window(payload.title)
+
+    @app.post("/windows/maximize")
+    async def window_maximize(payload: WindowActionPayload) -> dict[str, Any]:
+        return await runtime.system_controller.maximize_window(payload.title)
+
     @app.post("/plan")
     async def plan(payload: CommandPayload) -> dict[str, Any]:
         request = CommandRequest(text=payload.text, source="api-plan", metadata={"confirmed": payload.confirmed})
@@ -217,6 +367,92 @@ def create_app(settings_path: str | None = None) -> FastAPI:
     @app.get("/memory/graph")
     async def memory_graph(limit: int = Query(default=25, ge=1, le=100)) -> dict[str, Any]:
         return await runtime.memory.graph_snapshot(limit)
+
+    @app.get("/memory/projects")
+    async def memory_projects(limit: int = Query(default=10, ge=1, le=100)) -> list[dict[str, Any]]:
+        return await runtime.memory.project_contexts(limit=limit)
+
+    @app.get("/goals")
+    async def goals(
+        status: str | None = Query(default=None),
+        limit: int = Query(default=10, ge=1, le=100),
+    ) -> list[dict[str, Any]]:
+        return await runtime.memory.goals(status=status, limit=limit)
+
+    @app.post("/goals")
+    async def create_goal(payload: GoalPayload) -> dict[str, Any]:
+        goal = await runtime.memory.create_goal(
+            title=payload.title,
+            detail=payload.detail or payload.title,
+            priority=payload.priority,
+            next_action=payload.next_action,
+            project_id=payload.project_id,
+        )
+        return goal.to_dict()
+
+    @app.post("/goals/review")
+    async def review_goals() -> dict[str, Any]:
+        return await runtime.proactive.review_now(source="api")
+
+    @app.get("/goals/{goal_id}")
+    async def get_goal(goal_id: str) -> dict[str, Any]:
+        goal = await runtime.memory.goal(goal_id)
+        if goal is None:
+            raise HTTPException(status_code=404, detail="Goal not found.")
+        return goal
+
+    @app.post("/goals/{goal_id}/status")
+    async def update_goal_status(goal_id: str, payload: GoalStatusPayload) -> dict[str, Any]:
+        goal = await runtime.memory.update_goal(
+            goal_id,
+            status=payload.status,
+            priority=payload.priority,
+            next_action=payload.next_action,
+        )
+        if goal is None:
+            raise HTTPException(status_code=404, detail="Goal not found.")
+        return goal
+
+    @app.get("/workflows")
+    async def workflows(
+        status: str | None = Query(default=None),
+        limit: int = Query(default=10, ge=1, le=100),
+    ) -> list[dict[str, Any]]:
+        return await runtime.orchestration.workflows(status=status, limit=limit)
+
+    @app.post("/workflows")
+    async def create_workflow(payload: WorkflowPayload) -> dict[str, Any]:
+        return await runtime.orchestration.create_workflow(
+            title=payload.title,
+            commands=payload.steps,
+            goal_id=payload.goal_id,
+            metadata={"source": "api"},
+        )
+
+    @app.get("/workflows/{workflow_id}")
+    async def get_workflow(workflow_id: str) -> dict[str, Any]:
+        workflow = await runtime.memory.workflow(workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=404, detail="Workflow not found.")
+        return workflow
+
+    @app.post("/workflows/{workflow_id}/run")
+    async def run_workflow(workflow_id: str) -> dict[str, Any]:
+        result = await runtime.orchestration.run_workflow(workflow_id)
+        if not result.get("ok", False):
+            raise HTTPException(status_code=404, detail=result.get("error", "Workflow not found."))
+        return result
+
+    @app.post("/workflows/{workflow_id}/cancel")
+    async def cancel_workflow(workflow_id: str) -> dict[str, Any]:
+        result = await runtime.orchestration.cancel_workflow(workflow_id)
+        if not result.get("ok", False):
+            raise HTTPException(status_code=404, detail=result.get("error", "Workflow not found."))
+        return result
+
+    @app.get("/suggestions")
+    async def suggestions(limit: int = Query(default=10, ge=1, le=100)) -> list[dict[str, Any]]:
+        return await runtime.memory.proactive_suggestions(limit=limit)
 
     @app.get("/insights")
     async def insights() -> dict[str, Any]:

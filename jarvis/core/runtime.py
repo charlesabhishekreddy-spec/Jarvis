@@ -4,6 +4,8 @@ from pathlib import Path
 
 from jarvis.brain.intelligence import IntelligenceService
 from jarvis.brain.learning import AdaptiveLearningService
+from jarvis.brain.proactive import ProactiveReviewService
+from jarvis.automation.orchestration import OrchestrationService
 from jarvis.automation.scheduler import AutomationService
 from jarvis.brain.reasoning import ReasoningEngine
 from jarvis.memory.service import MemoryService
@@ -35,18 +37,40 @@ class JarvisRuntime(Service):
         self.system_controller = SystemController(self.security, settings)
         self.automation = AutomationService(self.bus, self.memory)
         self.command_queue = BackgroundCommandService(self.bus, self._execute_request_now)
+        self.orchestration = OrchestrationService(
+            bus=self.bus,
+            memory=self.memory,
+            submit_request=self.command_queue.submit,
+            lookup_execution=self.command_queue.get,
+            cancel_execution=self.command_queue.cancel,
+        )
         self.confirmations = ConfirmationService(self.memory, self.bus, self.command_queue.submit)
-        self.intelligence = IntelligenceService(settings.intelligence)
+        self.intelligence = IntelligenceService(
+            settings.intelligence,
+            gemini_api_key=settings.api_keys.gemini_api_key,
+        )
         self.learning = AdaptiveLearningService(
             memory=self.memory,
             intelligence=self.intelligence,
             enabled=settings.learning.enabled,
+            workspace_root=settings.security.allowed_workdirs[0] if settings.security.allowed_workdirs else None,
+        )
+        self.proactive = ProactiveReviewService(
+            memory=self.memory,
+            intelligence=self.intelligence,
+            bus=self.bus,
+            enabled=settings.learning.proactive_review_enabled,
+            interval_seconds=settings.learning.proactive_review_interval_seconds,
         )
         self.web = WebIntelligenceService(
             news_api_key=settings.api_keys.news_api_key,
             weather_api_key=settings.api_keys.weather_api_key,
         )
-        self.vision = VisionService()
+        self.vision = VisionService(
+            data_dir=settings.runtime.data_dir,
+            bus=self.bus,
+            memory=self.memory,
+        )
         self.tools = ToolRegistry()
         register_builtin_tools(self.tools)
         plugin_dir = Path(__file__).resolve().parents[1] / "plugins" / "examples"
@@ -58,12 +82,14 @@ class JarvisRuntime(Service):
             security=self.security,
             system_controller=self.system_controller,
             automation=self.automation,
+            orchestration=self.orchestration,
             web=self.web,
             vision=self.vision,
             tools=self.tools,
             plugins=self.plugins,
             intelligence=self.intelligence,
             learning=self.learning,
+            proactive=self.proactive,
             confirmations=self.confirmations,
             runtime=self,
         )
@@ -76,9 +102,11 @@ class JarvisRuntime(Service):
             self.system_controller,
             self.automation,
             self.command_queue,
+            self.orchestration,
             self.confirmations,
             self.intelligence,
             self.learning,
+            self.proactive,
             self.web,
             self.vision,
             self.plugins,
@@ -134,17 +162,28 @@ class JarvisRuntime(Service):
 
     async def status_snapshot(self) -> dict:
         resources = await self.system_controller.resource_usage()
+        processes = await self.system_controller.list_processes(limit=15)
+        windows = await self.system_controller.list_windows(limit=12)
         startup = await self.system_controller.startup_status()
         return {
             "runtime": {"state": self.state.value, "env": self.settings.runtime.env},
             "services": [service.status() for service in self.services],
+            "intelligence": self.intelligence.snapshot(),
             "plugins": self.plugins.list_plugins(),
             "tools": self.tools.list_tools(),
             "startup": startup,
+            "voice": self.voice.status_snapshot(),
+            "vision": self.vision.status_snapshot(),
             "jobs": await self.automation.snapshot_jobs(),
+            "workflows": await self.orchestration.workflows(limit=10),
+            "orchestration": self.orchestration.snapshot(),
             "command_queue": self.command_queue.snapshot(),
             "confirmations": {"pending": await self.confirmations.list(status="pending", limit=20)},
             "insights": await self.learning.insights(),
+            "goals": await self.memory.goals(limit=10),
+            "proactive_review": self.proactive.snapshot(),
+            "processes": processes,
+            "windows": windows,
             "resources": resources,
         }
 

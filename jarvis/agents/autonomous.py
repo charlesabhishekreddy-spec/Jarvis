@@ -23,16 +23,18 @@ class AutonomousAgent(BaseAgent):
         context: JarvisContext,
     ) -> dict[str, Any]:
         memories = await context.memory.recall(request.text, limit=3)
+        projects = await context.memory.project_contexts(limit=3)
+        goals = await context.memory.goals(status="active", limit=3)
         tool_calls = await context.intelligence.plan_tool_usage(
             request.text,
             context.tools.list_tools(),
-            context={"memories": memories, "plan": plan.to_dict()},
+            context={"memories": memories, "projects": projects, "goals": goals, "plan": plan.to_dict()},
             max_calls=step.metadata.get("max_calls", 3),
         )
         if not tool_calls:
             response = await context.intelligence.respond(
                 prompt=request.text,
-                context={"memories": memories, "plan": plan.to_dict()},
+                context={"memories": memories, "projects": projects, "goals": goals, "plan": plan.to_dict()},
             )
             return {"message": response.text, "provider": response.provider, "tool_calls": []}
 
@@ -52,7 +54,7 @@ class AutonomousAgent(BaseAgent):
 
         summary = await context.intelligence.respond(
             prompt=f"Summarize the tool-assisted result for: {request.text}",
-            context={"memories": memories, "results": fragments, "plan": plan.to_dict()},
+            context={"memories": memories, "projects": projects, "goals": goals, "results": fragments, "plan": plan.to_dict()},
         )
         return {
             "message": summary.text if summary.text.strip() else "\n".join(fragments),
@@ -71,6 +73,12 @@ class AutonomousAgent(BaseAgent):
             return f"Read file {result.get('path')}: {result.get('content', '')[:500]}"
         if call.name == "system.processes":
             return f"Running processes: {json.dumps(result.get('processes', [])[:10])}"
+        if call.name == "system.terminate_process":
+            return result.get("message", json.dumps(result))
+        if call.name == "system.windows":
+            return f"Windows: {json.dumps(result.get('windows', [])[:10])}"
+        if call.name in {"system.window_focus", "system.window_minimize", "system.window_maximize"}:
+            return result.get("message", json.dumps(result))
         if call.name == "web.search":
             return f"Web search results: {json.dumps(result.get('results', [])[:5])}"
         if call.name == "memory.recall":

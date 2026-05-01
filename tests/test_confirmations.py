@@ -33,6 +33,29 @@ class FakeDesktopBackend:
         self.actions.append(("hotkey", *keys))
 
 
+class FakeProcessBackend:
+    def __init__(self) -> None:
+        self.records = [
+            {"pid": 3001, "name": "python.exe", "cpu_percent": 1.0, "memory_percent": 2.0, "status": "running"},
+            {"pid": 3002, "name": "notepad.exe", "cpu_percent": 0.0, "memory_percent": 0.5, "status": "sleeping"},
+        ]
+        self.terminated: list[int] = []
+
+    def list_processes(self) -> list[dict[str, object]]:
+        return [dict(record) for record in self.records if int(record["pid"]) not in self.terminated]
+
+    def terminate_process(self, pid: int) -> dict[str, object]:
+        self.terminated.append(int(pid))
+        match = next((record for record in self.records if int(record["pid"]) == int(pid)), None)
+        return {
+            "ok": True,
+            "pid": int(pid),
+            "name": match["name"] if match else "unknown",
+            "status": "stopped",
+            "action": "terminated",
+        }
+
+
 class ConfirmationFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tempdir = Path.cwd() / ".test_runtime" / uuid4().hex
@@ -45,6 +68,8 @@ class ConfirmationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = JarvisRuntime(settings)
         self.desktop_backend = FakeDesktopBackend()
         self.runtime.system_controller.desktop = DesktopController(self.desktop_backend)
+        self.process_backend = FakeProcessBackend()
+        self.runtime.system_controller.processes.backend = self.process_backend
         await self.runtime.start()
 
     async def asyncTearDown(self) -> None:
@@ -102,3 +127,25 @@ class ConfirmationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "completed")
         self.assertIn("clicked", (final["message"] or "").lower())
         self.assertEqual(self.desktop_backend.actions[0], ("click", 15, 25, 1, "left"))
+
+    async def test_approve_process_termination_confirmation_executes_kill(self) -> None:
+        response = await self.runtime.execute_text("Jarvis stop process 3002", source="test")
+        self.assertEqual(response.status, TaskStatus.REQUIRES_CONFIRMATION)
+        confirmation_id = response.data["confirmation_id"]
+
+        result = await self.runtime.confirmations.approve(confirmation_id, decision_note="approved in test")
+        self.assertIsNotNone(result)
+        execution = result["execution"]
+        self.assertIsNotNone(execution)
+
+        for _ in range(100):
+            snapshot = self.runtime.command_queue.get(execution["request_id"])
+            if snapshot and snapshot["status"] in {"completed", "failed", "cancelled"}:
+                break
+            await asyncio.sleep(0.02)
+
+        final = self.runtime.command_queue.get(execution["request_id"])
+        self.assertIsNotNone(final)
+        self.assertEqual(final["status"], "completed")
+        self.assertIn("terminated process notepad.exe", (final["message"] or "").lower())
+        self.assertIn(3002, self.process_backend.terminated)

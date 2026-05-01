@@ -6,7 +6,7 @@ This repository provides:
 
 - An async runtime with lifecycle management, observability, and a message bus
 - Multi-agent planning and execution
-- Local-first intelligence providers with heuristic and Ollama-compatible backends
+- Gemini-first intelligence with heuristic fallback and optional Ollama compatibility
 - Tool-planned autonomous execution for workspace and system requests
 - Persistent memory with SQLite and a local semantic index
 - A personal knowledge graph and adaptive learning loop
@@ -14,6 +14,15 @@ This repository provides:
 - Background command queue with async submission and cancellation
 - Windows startup registration controls for boot persistence
 - Desktop automation primitives for mouse and keyboard control
+- Process inspection and confirmation-gated process termination
+- Window inspection plus focus, minimize, and maximize controls
+- Proactive suggestions and persistent project context
+- Persistent goals with background next-action review
+- Durable workflow orchestration on top of the command queue
+- Workflow restoration after runtime restart
+- Controllable always-on voice runtime with optional microphone capture
+- Vision runtime with screen capture, camera capture, OCR status, and artifact saving
+- Dependency-aware workflow planning for compound requests
 - Voice, vision, web, automation, and system-control service abstractions
 - A FastAPI developer surface, realtime event streams, a browser dashboard, and an optional PyQt dashboard
 - A plugin SDK with auto-loading example plugins
@@ -29,7 +38,13 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-3. Start the API-backed runtime:
+3. Configure Gemini:
+
+```powershell
+$env:JARVIS_GEMINI_API_KEY="your-api-key"
+```
+
+4. Start the API-backed runtime:
 
 ```powershell
 python -m jarvis.main --api
@@ -37,7 +52,7 @@ python -m jarvis.main --api
 
 Then open `http://127.0.0.1:8000/dashboard`.
 
-4. Submit a command:
+5. Submit a command:
 
 ```powershell
 curl -X POST http://127.0.0.1:8000/command -H "Content-Type: application/json" -d "{\"text\":\"Jarvis remember that my favorite editor is VS Code\"}"
@@ -72,9 +87,21 @@ python -m unittest discover -s tests -v
 - Async command inspection: `GET /commands`, `GET /commands/{request_id}`
 - Async command cancellation: `POST /commands/{request_id}/cancel`
 - Confirmation review: `GET /confirmations`, `POST /confirmations/{confirmation_id}/approve`, `POST /confirmations/{confirmation_id}/reject`
+- Intelligence provider inspection: `GET /intelligence`, `POST /intelligence/respond`
+- Voice controls: `GET /voice`, `POST /voice/start`, `POST /voice/stop`, `POST /voice/simulate`, `POST /voice/text`
+- Vision controls: `GET /vision`, `POST /vision/screen`, `POST /vision/camera`
+- Process controls: `GET /processes`, `POST /processes/terminate`
+- Window controls: `GET /windows`, `POST /windows/focus`, `POST /windows/minimize`, `POST /windows/maximize`
+- Project context: `GET /memory/projects`
+- Goals: `GET /goals`, `POST /goals`, `POST /goals/review`, `POST /goals/{goal_id}/status`
+- Workflows: `GET /workflows`, `POST /workflows`, `POST /workflows/{workflow_id}/run`, `POST /workflows/{workflow_id}/cancel`
+- Proactive suggestions: `GET /suggestions`
 - Startup controls: `GET /startup`, `POST /startup/install`, `POST /startup/uninstall`
 - Job inspection: `GET /jobs`
 - Job cancellation: `POST /jobs/{job_id}/cancel`
+
+The browser dashboard now includes an intelligence console for sending direct Gemini prompts with optional JSON context.
+The dashboard also surfaces voice and vision runtime state, running processes, desktop windows, proactive suggestions, active project context, persistent goals, and stored workflows, including queued workflow state after restart.
 
 ## Architecture
 
@@ -83,10 +110,13 @@ The runtime is organized under `jarvis/`:
 - `core`: configuration, lifecycle, event bus, logging, shared models
 - `brain`: task planning and reasoning loops
 - `agents`: specialist agents coordinated by the commander
-- `memory`: long-term storage and semantic recall
+- `memory`: long-term storage, semantic recall, project context, suggestions, and goals
 - `brain/intelligence.py`: local-first reasoning providers and summarization
 - `agents/autonomous.py`: tool-driven fallback agent for generic workspace/system tasks
 - `brain/learning.py`: adaptive behavior tracking and insights
+- `brain/proactive.py`: background goal review and next-action refresh
+- `automation/orchestration.py`: durable workflow storage and queued step execution
+- `voice/audio.py`: optional microphone capture backend
 - `voice`: wake word, VAD, STT, TTS, and orchestration
 - `vision`: OCR and visual context extraction
 - `system_control`: safe OS and shell integration
@@ -130,6 +160,58 @@ python -m jarvis.main --once "Jarvis click at 100 200"
 python -m jarvis.main --once "Jarvis press ctrl+shift+s"
 ```
 
+Process inspection and termination are also available:
+
+```powershell
+python -m jarvis.main --once "Jarvis list running processes"
+python -m jarvis.main --once "Jarvis stop process 1234"
+```
+
+Window inspection and control are also available:
+
+```powershell
+python -m jarvis.main --once "Jarvis list open windows"
+python -m jarvis.main --once "Jarvis focus window Visual Studio Code"
+python -m jarvis.main --once "Jarvis minimize window Microsoft Edge"
+```
+
+Voice commands can be simulated through the API or dashboard even when the live microphone stack is unavailable:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/voice
+Invoke-RestMethod -Uri http://127.0.0.1:8000/voice/simulate -Method Post -ContentType "application/json" -Body '{"text":"Hey Jarvis what are we working on"}'
+```
+
+Vision captures are also exposed through the API and dashboard:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/vision
+Invoke-RestMethod -Uri http://127.0.0.1:8000/vision/screen -Method Post -ContentType "application/json" -Body '{"save_artifact":true,"include_ocr":true,"label":"ops"}'
+Invoke-RestMethod -Uri http://127.0.0.1:8000/vision/camera -Method Post -ContentType "application/json" -Body '{"save_artifact":true,"include_ocr":false,"label":"desk"}'
+```
+
+Compound requests now build explicit workflow plans with dependencies:
+
+```powershell
+python -m jarvis.main --once "Jarvis remember that my task board is Linear then what did I say about task board"
+```
+
+Persistent goal tracking is also available through natural language:
+
+```powershell
+python -m jarvis.main --once "Jarvis track goal ship the API upgrade"
+python -m jarvis.main --once "Jarvis what should I focus on"
+python -m jarvis.main --once "Jarvis complete goal ship the API upgrade"
+```
+
+Stored workflows can orchestrate multiple commands across the existing agents:
+
+```powershell
+python -m jarvis.main --once "Jarvis create workflow research renewable energy then prepare a report then remind me tomorrow at 8am to review it"
+python -m jarvis.main --once "Jarvis list workflows"
+python -m jarvis.main --once "Jarvis run workflow research renewable energy and 2 more steps"
+```
+
 ## Persistence
 
 By default JARVIS stores runtime data under `.jarvis_runtime/` in the project root:
@@ -140,6 +222,6 @@ By default JARVIS stores runtime data under `.jarvis_runtime/` in the project ro
 
 ## Next Steps
 
-- Configure API keys or external providers in `jarvis/config/settings.yaml`
+- Configure `JARVIS_GEMINI_API_KEY` or switch providers in `jarvis/config/settings.yaml`
 - Extend `jarvis/plugins/base.py` and `jarvis/plugins/sdk.py` to add new capabilities
 - Replace fallback providers with GPU-backed local or cloud models

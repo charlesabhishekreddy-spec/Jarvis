@@ -15,10 +15,64 @@ WEEKLY_PATTERN = re.compile(
 DAILY_PATTERN = re.compile(r"every\s+day\s+at\s+([0-2]?\d(?::[0-5]\d)?\s*(?:am|pm)?)", re.IGNORECASE)
 REMEMBER_PATTERN = re.compile(r"remember(?:\s+that)?\s+(.*)", re.IGNORECASE)
 RECALL_PATTERN = re.compile(r"(?:recall|what do you know about|what did i say about)\s+(.*)", re.IGNORECASE)
+SUGGESTIONS_PATTERN = re.compile(r"(?:what should i do next|what next|next steps?|any suggestions|what do you suggest)", re.IGNORECASE)
+FOCUS_PATTERN = re.compile(r"(?:what should i focus on|top priorities|priority list|where should i focus)", re.IGNORECASE)
+PROJECT_CONTEXT_PATTERN = re.compile(r"(?:project context|project summary|what are we working on|current project)", re.IGNORECASE)
+GOAL_CREATE_PATTERN = re.compile(r"(?:track|create|add|start)\s+(?:a\s+)?goal(?:\s+to)?\s+(.+)", re.IGNORECASE)
+GOAL_LIST_PATTERN = re.compile(r"(?:show|list)\s+(?:my\s+)?goals|what are my goals|active goals", re.IGNORECASE)
+GOAL_REVIEW_PATTERN = re.compile(r"(?:refresh|reassess|review|update)\s+(?:my\s+)?goals", re.IGNORECASE)
+GOAL_COMPLETE_PATTERN = re.compile(r"(?:complete|finish|close|mark done)\s+goal\s+(.+)", re.IGNORECASE)
+GOAL_PAUSE_PATTERN = re.compile(r"(?:pause|hold)\s+goal\s+(.+)", re.IGNORECASE)
+GOAL_RESUME_PATTERN = re.compile(r"(?:resume|reopen|reactivate)\s+goal\s+(.+)", re.IGNORECASE)
+GOAL_BLOCK_PATTERN = re.compile(r"(?:block|mark blocked)\s+goal\s+(.+)", re.IGNORECASE)
+WORKFLOW_CREATE_PATTERN = re.compile(r"(?:create|build|track)\s+(?:a\s+)?workflow(?:\s+(?:for|to))?\s+(.+)", re.IGNORECASE)
+WORKFLOW_LIST_PATTERN = re.compile(r"(?:show|list)\s+workflows|what workflows are running|workflow status", re.IGNORECASE)
+WORKFLOW_RUN_PATTERN = re.compile(r"(?:run|start|resume)\s+workflow\s+(.+)", re.IGNORECASE)
+WORKFLOW_CANCEL_PATTERN = re.compile(r"(?:cancel|stop)\s+workflow\s+(.+)", re.IGNORECASE)
 OPEN_PATTERN = re.compile(r"(?:open|launch)\s+(.+)", re.IGNORECASE)
 WEATHER_PATTERN = re.compile(r"weather(?:\s+in)?\s+(.+)", re.IGNORECASE)
 NEWS_PATTERN = re.compile(r"(?:news|latest)\s+(?:about\s+)?(.+)", re.IGNORECASE)
 STATUS_PATTERN = re.compile(r"(?:status|health|resources)", re.IGNORECASE)
+PROCESS_LIST_PATTERN = re.compile(
+    r"(?:show|list|inspect)\s+(?:the\s+)?(?:running\s+)?(?:processes|apps|applications)|(?:what\s+is\s+running|running\s+process(?:es)?|running\s+apps)",
+    re.IGNORECASE,
+)
+PROCESS_TERMINATE_PID_PATTERN = re.compile(
+    r"(?:kill|stop|terminate|end|close)\s+(?:the\s+)?(?:process|pid|app(?:lication)?)\s+(\d+)",
+    re.IGNORECASE,
+)
+PROCESS_TERMINATE_NAME_PATTERN = re.compile(
+    r"(?:kill|stop|terminate|end|close)\s+(?:the\s+)?(?:process|app(?:lication)?)\s+(.+)",
+    re.IGNORECASE,
+)
+WINDOW_LIST_PATTERN = re.compile(
+    r"(?:show|list|inspect)\s+(?:the\s+)?(?:open|active)?\s*windows|(?:window list|open windows|active windows)",
+    re.IGNORECASE,
+)
+WINDOW_FOCUS_PATTERN = re.compile(
+    r"(?:focus|activate|switch to|bring to front)\s+(?:the\s+)?window\s+(.+)",
+    re.IGNORECASE,
+)
+WINDOW_MINIMIZE_PATTERN = re.compile(
+    r"(?:minimi[sz]e|hide)\s+(?:the\s+)?window\s+(.+)",
+    re.IGNORECASE,
+)
+WINDOW_MAXIMIZE_PATTERN = re.compile(
+    r"(?:maximi[sz]e|fullscreen)\s+(?:the\s+)?window\s+(.+)",
+    re.IGNORECASE,
+)
+VISION_STATUS_PATTERN = re.compile(
+    r"(?:vision status|camera status|ocr status|screen capture status|what can you see)",
+    re.IGNORECASE,
+)
+SCREEN_CAPTURE_PATTERN = re.compile(
+    r"(?:inspect|capture|scan|read|analy[sz]e).*(?:screen|display|desktop)|(?:read|ocr).*(?:screen|display)",
+    re.IGNORECASE,
+)
+CAMERA_CAPTURE_PATTERN = re.compile(
+    r"(?:inspect|capture|scan|check|analy[sz]e|show).*(?:camera|webcam)|(?:take|grab).*(?:photo|picture).*(?:camera|webcam)?",
+    re.IGNORECASE,
+)
 TOOLS_PATTERN = re.compile(r"(?:tools|capabilities|what can you do)", re.IGNORECASE)
 STARTUP_STATUS_PATTERN = re.compile(
     r"(?:startup status|autostart status|boot status|start(?:ing)? on (?:boot|login)|is jarvis set to start)",
@@ -43,6 +97,7 @@ MOUSE_CLICK_PATTERN = re.compile(
 )
 KEYBOARD_TYPE_PATTERN = re.compile(r"(?:type|enter)\s+(.+)", re.IGNORECASE)
 KEYBOARD_PRESS_PATTERN = re.compile(r"(?:press|hit|shortcut|hotkey)\s+(.+)", re.IGNORECASE)
+WORKFLOW_SPLIT_PATTERN = re.compile(r"\b(?:and then|then|after that|followed by|next)\b", re.IGNORECASE)
 
 
 class TaskPlanner:
@@ -52,14 +107,67 @@ class TaskPlanner:
 
     def create_plan(self, request: CommandRequest) -> TaskPlan:
         text = self._normalize(request.text)
-        steps = self._build_steps(text)
-        return TaskPlan(goal=text, steps=steps)
+        steps, metadata = self._build_steps(text)
+        return TaskPlan(goal=text, steps=steps, metadata=metadata)
 
     def _normalize(self, text: str) -> str:
         lowered = text.strip()
         return re.sub(r"^(hey\s+jarvis|jarvis)[,\s:]+", "", lowered, flags=re.IGNORECASE)
 
-    def _build_steps(self, text: str) -> list[TaskStep]:
+    def _build_steps(self, text: str, allow_compound: bool = True) -> tuple[list[TaskStep], dict[str, str]]:
+        if allow_compound:
+            workflow_create_match = WORKFLOW_CREATE_PATTERN.search(text)
+            if workflow_create_match:
+                commands = self._extract_workflow_commands(workflow_create_match.group(1).strip())
+                return [
+                    TaskStep(
+                        title="Create persistent workflow",
+                        description=text,
+                        agent_hint="automation",
+                        metadata={
+                            "operation": "workflow_create",
+                            "title": self._workflow_title_from_commands(commands),
+                            "commands": commands,
+                        },
+                    )
+                ], {"plan_type": "workflows"}
+        if WORKFLOW_LIST_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="List workflows",
+                    description=text,
+                    agent_hint="automation",
+                    metadata={"operation": "workflows", "limit": 10},
+                )
+            ], {"plan_type": "workflows"}
+
+        workflow_run_match = WORKFLOW_RUN_PATTERN.search(text)
+        if workflow_run_match:
+            return [
+                TaskStep(
+                    title="Run workflow",
+                    description=text,
+                    agent_hint="automation",
+                    metadata={"operation": "workflow_run", "title": workflow_run_match.group(1).strip().rstrip(".")},
+                )
+            ], {"plan_type": "workflows"}
+
+        workflow_cancel_match = WORKFLOW_CANCEL_PATTERN.search(text)
+        if workflow_cancel_match:
+            return [
+                TaskStep(
+                    title="Cancel workflow",
+                    description=text,
+                    agent_hint="automation",
+                    metadata={"operation": "workflow_cancel", "title": workflow_cancel_match.group(1).strip().rstrip(".")},
+                )
+            ], {"plan_type": "workflows"}
+
+        if allow_compound:
+            workflow_steps = self._build_workflow_steps(text)
+            if workflow_steps:
+                return workflow_steps, {"plan_type": "workflow"}
+
         remember_match = REMEMBER_PATTERN.search(text)
         if remember_match:
             return [
@@ -69,7 +177,7 @@ class TaskPlanner:
                     agent_hint="memory",
                     metadata={"operation": "remember", "content": remember_match.group(1), "category": "user_preference"},
                 )
-            ]
+            ], {"plan_type": "memory"}
 
         recall_match = RECALL_PATTERN.search(text)
         if recall_match:
@@ -80,7 +188,138 @@ class TaskPlanner:
                     agent_hint="memory",
                     metadata={"operation": "recall", "query": recall_match.group(1)},
                 )
-            ]
+            ], {"plan_type": "memory"}
+
+        if SUGGESTIONS_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Review proactive suggestions",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={"operation": "suggestions", "limit": 5},
+                )
+            ], {"plan_type": "proactive"}
+
+        if FOCUS_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Review active goals",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={"operation": "goals", "status": "active", "limit": 5},
+                )
+            ], {"plan_type": "goals"}
+
+        if PROJECT_CONTEXT_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Review project context",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={"operation": "projects", "limit": 5},
+                )
+            ], {"plan_type": "project_context"}
+
+        goal_create_match = GOAL_CREATE_PATTERN.search(text)
+        if goal_create_match:
+            title = goal_create_match.group(1).strip().rstrip(".")
+            return [
+                TaskStep(
+                    title="Track persistent goal",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={
+                        "operation": "goal_create",
+                        "title": title,
+                        "detail": title,
+                        "priority": self._extract_goal_priority(text),
+                    },
+                )
+            ], {"plan_type": "goals"}
+
+        if GOAL_LIST_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="List persistent goals",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={"operation": "goals", "status": "active", "limit": 10},
+                )
+            ], {"plan_type": "goals"}
+
+        if GOAL_REVIEW_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Review active goals",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={"operation": "review_goals"},
+                )
+            ], {"plan_type": "goals"}
+
+        goal_complete_match = GOAL_COMPLETE_PATTERN.search(text)
+        if goal_complete_match:
+            return [
+                TaskStep(
+                    title="Complete persistent goal",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={
+                        "operation": "goal_update",
+                        "title": goal_complete_match.group(1).strip().rstrip("."),
+                        "statuses": ["active", "paused", "blocked", "completed"],
+                        "status": "completed",
+                    },
+                )
+            ], {"plan_type": "goals"}
+
+        goal_pause_match = GOAL_PAUSE_PATTERN.search(text)
+        if goal_pause_match:
+            return [
+                TaskStep(
+                    title="Pause persistent goal",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={
+                        "operation": "goal_update",
+                        "title": goal_pause_match.group(1).strip().rstrip("."),
+                        "statuses": ["active", "blocked", "paused"],
+                        "status": "paused",
+                    },
+                )
+            ], {"plan_type": "goals"}
+
+        goal_resume_match = GOAL_RESUME_PATTERN.search(text)
+        if goal_resume_match:
+            return [
+                TaskStep(
+                    title="Resume persistent goal",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={
+                        "operation": "goal_update",
+                        "title": goal_resume_match.group(1).strip().rstrip("."),
+                        "statuses": ["paused", "blocked", "active"],
+                        "status": "active",
+                    },
+                )
+            ], {"plan_type": "goals"}
+
+        goal_block_match = GOAL_BLOCK_PATTERN.search(text)
+        if goal_block_match:
+            return [
+                TaskStep(
+                    title="Block persistent goal",
+                    description=text,
+                    agent_hint="memory",
+                    metadata={
+                        "operation": "goal_update",
+                        "title": goal_block_match.group(1).strip().rstrip("."),
+                        "statuses": ["active", "paused", "blocked"],
+                        "status": "blocked",
+                    },
+                )
+            ], {"plan_type": "goals"}
 
         daily_match = DAILY_PATTERN.search(text)
         if daily_match:
@@ -95,7 +334,7 @@ class TaskPlanner:
                         "time_of_day": self._normalize_time(daily_match.group(1)),
                     },
                 )
-            ]
+            ], {"plan_type": "automation"}
 
         weekly_match = WEEKLY_PATTERN.search(text)
         if weekly_match:
@@ -111,7 +350,7 @@ class TaskPlanner:
                         "time_of_day": self._normalize_time(weekly_match.group(2)),
                     },
                 )
-            ]
+            ], {"plan_type": "automation"}
 
         if text.lower().startswith("remind me"):
             return [
@@ -121,7 +360,7 @@ class TaskPlanner:
                     agent_hint="automation",
                     metadata={"schedule_type": "once", "message": text, "run_at": self._extract_iso_datetime(text)},
                 )
-            ]
+            ], {"plan_type": "automation"}
 
         weather_match = WEATHER_PATTERN.search(text)
         if weather_match:
@@ -132,7 +371,7 @@ class TaskPlanner:
                     agent_hint="research",
                     metadata={"query_type": "weather", "location": weather_match.group(1).strip()},
                 )
-            ]
+            ], {"plan_type": "research"}
 
         news_match = NEWS_PATTERN.search(text)
         if "news" in text.lower() or "latest" in text.lower():
@@ -144,17 +383,152 @@ class TaskPlanner:
                     agent_hint="research",
                     metadata={"query_type": "news", "topic": topic},
                 )
-            ]
+            ], {"plan_type": "research"}
 
-        if "screen" in text.lower() or "ocr" in text.lower():
+        if PROCESS_LIST_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="List running processes",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "list_processes", "limit": 20},
+                )
+            ], {"plan_type": "system"}
+
+        process_terminate_pid_match = PROCESS_TERMINATE_PID_PATTERN.search(text)
+        if process_terminate_pid_match:
+            pid = int(process_terminate_pid_match.group(1))
+            steps = [
+                TaskStep(
+                    title="Evaluate process termination safety",
+                    description=text,
+                    agent_hint="security",
+                    metadata={"command": text},
+                ),
+                TaskStep(
+                    title="Terminate process",
+                    description=text,
+                    agent_hint="system",
+                    metadata={
+                        "action": "terminate_process",
+                        "pid": pid,
+                        "requires_confirmation": True,
+                        "risk_level": "high",
+                    },
+                ),
+            ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
+
+        process_terminate_name_match = PROCESS_TERMINATE_NAME_PATTERN.search(text)
+        if process_terminate_name_match:
+            target_name = process_terminate_name_match.group(1).strip().rstrip(".")
+            steps = [
+                TaskStep(
+                    title="Evaluate process termination safety",
+                    description=text,
+                    agent_hint="security",
+                    metadata={"command": text},
+                ),
+                TaskStep(
+                    title="Terminate process",
+                    description=text,
+                    agent_hint="system",
+                    metadata={
+                        "action": "terminate_process",
+                        "process_name": target_name,
+                        "requires_confirmation": True,
+                        "risk_level": "high",
+                    },
+                ),
+            ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
+
+        if WINDOW_LIST_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="List desktop windows",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "list_windows", "limit": 20},
+                )
+            ], {"plan_type": "system"}
+
+        window_focus_match = WINDOW_FOCUS_PATTERN.search(text)
+        if window_focus_match:
+            return [
+                TaskStep(
+                    title="Focus desktop window",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "focus_window", "title": window_focus_match.group(1).strip().rstrip(".")},
+                )
+            ], {"plan_type": "system"}
+
+        window_minimize_match = WINDOW_MINIMIZE_PATTERN.search(text)
+        if window_minimize_match:
+            return [
+                TaskStep(
+                    title="Minimize desktop window",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "minimize_window", "title": window_minimize_match.group(1).strip().rstrip(".")},
+                )
+            ], {"plan_type": "system"}
+
+        window_maximize_match = WINDOW_MAXIMIZE_PATTERN.search(text)
+        if window_maximize_match:
+            return [
+                TaskStep(
+                    title="Maximize desktop window",
+                    description=text,
+                    agent_hint="system",
+                    metadata={"action": "maximize_window", "title": window_maximize_match.group(1).strip().rstrip(".")},
+                )
+            ], {"plan_type": "system"}
+
+        if VISION_STATUS_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Inspect vision runtime status",
+                    description=text,
+                    agent_hint="vision",
+                    metadata={"operation": "status"},
+                )
+            ], {"plan_type": "vision"}
+
+        if CAMERA_CAPTURE_PATTERN.search(text):
+            return [
+                TaskStep(
+                    title="Inspect camera",
+                    description=text,
+                    agent_hint="vision",
+                    metadata={
+                        "operation": "inspect",
+                        "source": "camera",
+                        "save_artifact": True,
+                        "include_ocr": "read" in text.lower() or "ocr" in text.lower(),
+                    },
+                )
+            ], {"plan_type": "vision"}
+
+        if (
+            SCREEN_CAPTURE_PATTERN.search(text)
+            or ("screen" in text.lower() and not DESKTOP_STATUS_PATTERN.search(text))
+            or "ocr" in text.lower()
+        ):
             return [
                 TaskStep(
                     title="Inspect screen",
                     description=text,
                     agent_hint="vision",
-                    metadata={"source": "screen"},
+                    metadata={
+                        "operation": "inspect",
+                        "source": "screen",
+                        "save_artifact": True,
+                        "include_ocr": True,
+                    },
                 )
-            ]
+            ], {"plan_type": "vision"}
 
         if DESKTOP_STATUS_PATTERN.search(text):
             return [
@@ -164,11 +538,11 @@ class TaskPlanner:
                     agent_hint="system",
                     metadata={"action": "desktop_status"},
                 )
-            ]
+            ], {"plan_type": "system"}
 
         mouse_move_match = MOUSE_MOVE_PATTERN.search(text)
         if mouse_move_match:
-            return [
+            steps = [
                 TaskStep(
                     title="Evaluate mouse automation safety",
                     description=text,
@@ -189,13 +563,14 @@ class TaskPlanner:
                     },
                 ),
             ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
 
         mouse_click_match = MOUSE_CLICK_PATTERN.search(text)
         if mouse_click_match:
             button_token = mouse_click_match.group(1).lower()
             button = "right" if "right" in button_token else "middle" if "middle" in button_token else "left"
             clicks = 2 if "double" in button_token else 1
-            return [
+            steps = [
                 TaskStep(
                     title="Evaluate mouse click safety",
                     description=text,
@@ -217,11 +592,12 @@ class TaskPlanner:
                     },
                 ),
             ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
 
         keyboard_press_match = KEYBOARD_PRESS_PATTERN.search(text)
         if keyboard_press_match:
             keys = self._extract_keys(keyboard_press_match.group(1))
-            return [
+            steps = [
                 TaskStep(
                     title="Evaluate keyboard automation safety",
                     description=text,
@@ -240,10 +616,11 @@ class TaskPlanner:
                     },
                 ),
             ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
 
         keyboard_type_match = KEYBOARD_TYPE_PATTERN.search(text)
         if keyboard_type_match:
-            return [
+            steps = [
                 TaskStep(
                     title="Evaluate typing safety",
                     description=text,
@@ -263,6 +640,7 @@ class TaskPlanner:
                     },
                 ),
             ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
 
         if STARTUP_STATUS_PATTERN.search(text):
             return [
@@ -272,11 +650,11 @@ class TaskPlanner:
                     agent_hint="system",
                     metadata={"action": "startup_status", "mode": self._extract_startup_mode(text)},
                 )
-            ]
+            ], {"plan_type": "system"}
 
         if STARTUP_INSTALL_PATTERN.search(text):
             mode = self._extract_startup_mode(text)
-            return [
+            steps = [
                 TaskStep(
                     title="Evaluate startup configuration safety",
                     description=text,
@@ -290,9 +668,10 @@ class TaskPlanner:
                     metadata={"action": "install_startup", "mode": mode, "requires_confirmation": True, "risk_level": "high"},
                 ),
             ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
 
         if STARTUP_UNINSTALL_PATTERN.search(text):
-            return [
+            steps = [
                 TaskStep(
                     title="Evaluate startup removal safety",
                     description=text,
@@ -306,6 +685,7 @@ class TaskPlanner:
                     metadata={"action": "uninstall_startup", "requires_confirmation": True, "risk_level": "high"},
                 ),
             ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
 
         if STATUS_PATTERN.search(text):
             return [
@@ -315,7 +695,7 @@ class TaskPlanner:
                     agent_hint="system",
                     metadata={"action": "resource_usage"},
                 )
-            ]
+            ], {"plan_type": "system"}
 
         if TOOLS_PATTERN.search(text):
             return [
@@ -325,7 +705,7 @@ class TaskPlanner:
                     agent_hint="commander",
                     metadata={"include_tools": True},
                 )
-            ]
+            ], {"plan_type": "commander"}
 
         open_match = OPEN_PATTERN.search(text)
         if open_match:
@@ -337,12 +717,12 @@ class TaskPlanner:
                 metadata["path"] = str(candidate)
             else:
                 metadata["application"] = target
-            return [TaskStep(title="Open target", description=text, agent_hint="system", metadata=metadata)]
+            return [TaskStep(title="Open target", description=text, agent_hint="system", metadata=metadata)], {"plan_type": "system"}
 
         if self._contains_any_term(text, ("report", "research", "prepare")):
             slug = self._slugify(text)[:50]
             output_path = self.workspace_root / "reports" / f"{slug or uuid4().hex}.md"
-            return [
+            steps = [
                 TaskStep(
                     title="Research topic",
                     description=text,
@@ -361,10 +741,17 @@ class TaskPlanner:
                     agent_hint="system",
                     metadata={"action": "write_file", "path": str(output_path), "content_from_previous": True},
                 ),
+                TaskStep(
+                    title="Validate deliverable",
+                    description="Confirm the report exists and summarize what was produced.",
+                    agent_hint="commander",
+                    metadata={"validate_deliverable": True},
+                ),
             ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
 
         if self._contains_any_term(text, ("run", "execute", "terminal")):
-            return [
+            steps = [
                 TaskStep(
                     title="Evaluate execution safety",
                     description=text,
@@ -383,6 +770,7 @@ class TaskPlanner:
                     },
                 ),
             ]
+            return self._chain_steps(steps), {"plan_type": "workflow"}
 
         return [
             TaskStep(
@@ -390,7 +778,34 @@ class TaskPlanner:
                 description=text,
                 agent_hint="autonomous",
             )
-        ]
+        ], {"plan_type": "autonomous"}
+
+    def _build_workflow_steps(self, text: str) -> list[TaskStep]:
+        parts = [part.strip(" ,.") for part in WORKFLOW_SPLIT_PATTERN.split(text) if part.strip(" ,.")]
+        if len(parts) < 2:
+            return []
+        steps: list[TaskStep] = []
+        previous_step_id: str | None = None
+        for index, part in enumerate(parts, start=1):
+            clause_steps, _ = self._build_steps(part, allow_compound=False)
+            if not clause_steps:
+                continue
+            for clause_index, step in enumerate(clause_steps):
+                if clause_index == 0 and previous_step_id:
+                    step.depends_on.append(previous_step_id)
+                steps.append(step)
+                previous_step_id = step.step_id
+            if clause_steps:
+                clause_steps[0].title = f"Workflow {index}: {clause_steps[0].title}"
+        return steps
+
+    def _chain_steps(self, steps: list[TaskStep]) -> list[TaskStep]:
+        previous_step_id: str | None = None
+        for step in steps:
+            if previous_step_id and previous_step_id not in step.depends_on:
+                step.depends_on.append(previous_step_id)
+            previous_step_id = step.step_id
+        return steps
 
     def _normalize_time(self, raw: str) -> str:
         value = raw.strip().lower()
@@ -478,3 +893,24 @@ class TaskPlanner:
         }
         normalized = [aliases.get(part.lower(), part.lower()) for part in parts if part]
         return normalized
+
+    def _extract_goal_priority(self, text: str) -> int:
+        lowered = text.lower()
+        if any(token in lowered for token in ("critical", "urgent")):
+            return 95
+        if "high priority" in lowered or "important" in lowered:
+            return 80
+        if "low priority" in lowered:
+            return 30
+        return 60
+
+    def _extract_workflow_commands(self, text: str) -> list[str]:
+        commands = [part.strip(" ,.") for part in WORKFLOW_SPLIT_PATTERN.split(text) if part.strip(" ,.")]
+        return commands or [text.strip()]
+
+    def _workflow_title_from_commands(self, commands: list[str]) -> str:
+        if not commands:
+            return "Workflow"
+        if len(commands) == 1:
+            return commands[0]
+        return f"{commands[0]} and {len(commands) - 1} more steps"

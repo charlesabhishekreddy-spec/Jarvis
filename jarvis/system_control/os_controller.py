@@ -15,6 +15,7 @@ from jarvis.core.service import Service
 from jarvis.security.manager import SecurityManager
 
 from .desktop import DesktopController
+from .processes import ProcessController
 from .startup import StartupManager
 from .terminal import ShellCommandResult, TerminalExecutor
 
@@ -24,6 +25,7 @@ class SystemController(Service):
         super().__init__("jarvis.system")
         self.security = security
         self.desktop = DesktopController()
+        self.processes = ProcessController()
         self.startup = StartupManager(settings)
         self.terminal = TerminalExecutor(security)
 
@@ -86,19 +88,11 @@ class SystemController(Service):
             return {"ok": False, "error": f"Failed to read file: {exc}"}
         return {"ok": True, "path": str(target), "content": content[: max(max_chars, 1)]}
 
-    async def list_processes(self, limit: int = 20) -> dict[str, Any]:
-        if psutil is None:
-            return {"ok": True, "processes": []}
-        processes = [
-            {
-                "pid": process.info["pid"],
-                "name": process.info["name"],
-                "cpu_percent": process.info.get("cpu_percent"),
-                "memory_percent": process.info.get("memory_percent"),
-            }
-            for process in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"])
-        ][: max(limit, 1)]
-        return {"ok": True, "processes": processes}
+    async def list_processes(self, limit: int = 20, query: str | None = None) -> dict[str, Any]:
+        return await self.processes.list_processes(limit=limit, query=query)
+
+    async def terminate_process(self, pid: int | None = None, name: str | None = None) -> dict[str, Any]:
+        return await self.processes.terminate_process(pid=pid, name=name)
 
     async def resource_usage(self) -> dict[str, Any]:
         if psutil is None:
@@ -136,6 +130,18 @@ class SystemController(Service):
 
     async def desktop_status(self) -> dict[str, Any]:
         return await self.desktop.status()
+
+    async def list_windows(self, limit: int = 20, query: str | None = None) -> dict[str, Any]:
+        return await self.desktop.list_windows(limit=limit, query=query)
+
+    async def focus_window(self, title: str) -> dict[str, Any]:
+        return await self.desktop.focus_window(title)
+
+    async def minimize_window(self, title: str) -> dict[str, Any]:
+        return await self.desktop.minimize_window(title)
+
+    async def maximize_window(self, title: str) -> dict[str, Any]:
+        return await self.desktop.maximize_window(title)
 
     async def move_mouse(self, x: int, y: int, duration: float = 0.0) -> dict[str, Any]:
         return await self.desktop.move_mouse(x=x, y=y, duration=duration)
